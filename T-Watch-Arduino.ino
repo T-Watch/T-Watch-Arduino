@@ -28,7 +28,6 @@ typedef struct
 } Training;
 
 PulseSensorPlayground pulseSensor;
-float Xi, Yi, Zi;
 ADXL345 adxl;
 TinyGPS gps;
 SoftwareSerial BT(5, 6);
@@ -54,13 +53,13 @@ void setup()
     Serial.println(F("Carpeta trainings creada"));
     SD.mkdir(F("t"));
   }
-  
+
   if (!SD.exists(F("r")))
   {
     Serial.println(F("Carpeta results creada"));
     SD.mkdir(F("r"));
   }
-  
+
   pulseSensor.analogInput(0);
   pulseSensor.setThreshold(550);
 
@@ -103,7 +102,6 @@ void loop()
       myInts[9] = gps.f_course();
       myInts[10] = gps.f_speed_kmph();
       myInts[11] = distance;
-      coord_acelerometro();
       Serial.print(F("Escribiendo en sd.."));
       guardarDatos(myInts);
     }
@@ -130,27 +128,9 @@ void loop()
     delay(10000);*/
 }
 
-
-void coord_acelerometro() {
-
-  float ax, ay, az;
-  ax = adxl.AxisDigitalAccelerometerRead(5, 'X');
-  ay = adxl.AxisDigitalAccelerometerRead(5, 'Y');
-  az = adxl.AxisDigitalAccelerometerRead(5, 'Z');
-
-  Xi = acos(ax) * 180 / (PI);
-  Yi = acos(ay) * 180 / (PI);
-  Zi = acos(az) * 180 / (PI);
-
-  Serial.print(F("IMU:"));
-
-  Serial.print(Xi);
-
-  Serial.print(Yi);
-
-  Serial.print(Zi);
-
-  return;
+float axisAccel(char axis) {
+  float a = adxl.AxisDigitalAccelerometerRead(5, axis);
+  return acos(a) * 180 / (PI);
 }
 
 
@@ -191,11 +171,11 @@ void guardarDatos(float myInts[12])
     logFile.print((int)myInts[11]);
 
     logFile.print(F("~"));
-    logFile.print(Xi);
+    logFile.print(axisAccel('X'));
     logFile.print(F(";"));
-    logFile.print(Yi);
+    logFile.print(axisAccel('Y'));
     logFile.print(F(";"));
-    logFile.print(Zi);
+    logFile.print(axisAccel('Z'));
 
     logFile.print(F("~"));
     logFile.print(pulsaciones);
