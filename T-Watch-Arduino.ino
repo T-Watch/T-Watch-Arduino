@@ -125,8 +125,8 @@ void loop()
     }
   }
   /*Training *t = readTraining(F("t1.txt"));
-  printTraining(t);
-  freeTraining(t);*/
+    printTraining(t);
+    freeTraining(t);*/
   delay(3000);
 }
 
@@ -189,8 +189,6 @@ void guardarDatos(float myInts[12])
   else {
     Serial.println(F("Error al abrir el archivo"));
   }
-  delay(500);
-
 }
 
 void  sendResultsBT() {
@@ -214,6 +212,8 @@ void  sendResultsBT() {
     BT.print(logFile.readStringUntil('\n'));
     waitForACK();
   }
+  sendACK();
+  Serial.println("JJ");
 
   logFile.close();
 }
@@ -222,7 +222,6 @@ void receiveTrainingsBT() {
   sendACK();
   while (true) {
     if (!BT.available()) {
-      delay(100);
       continue;
     }
 
@@ -247,7 +246,6 @@ void waitForACK() {
         break;
       }
     }
-    delay(100);
   }
 }
 
@@ -265,7 +263,6 @@ void trainingToSD() {
   String msg;
   while (true) {
     if (!BT.available()) {
-      delay(100);
       continue;
     }
     msg = BT.readString();
@@ -332,7 +329,7 @@ Training* readTraining(String fileName) {
       tb = tb->next;
       continue;
     }
-    
+
     tb->_id = msg;
     msg = dataFile.readStringUntil('\n');
     tb->distance = msg.toInt();
