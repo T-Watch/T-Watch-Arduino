@@ -125,9 +125,8 @@ void loop()
     }
   }
   /*Training *t = readTraining(F("t1.txt"));
-    printTraining(t);
-    freeTraining(t);
-    delay(10000);*/
+  printTraining(t);
+  freeTraining(t);*/
   delay(3000);
 }
 
@@ -203,6 +202,12 @@ void  sendResultsBT() {
     return;
   }
 
+  if (!logFile.available()) {
+    Serial.print(F("No results to send"));
+    BT.print("&");
+    return;
+  }
+
   while (logFile.available()) {
     BT.write("resultado entrenamiento");
     waitForACK();
@@ -223,6 +228,7 @@ void receiveTrainingsBT() {
 
     String msg = BT.readString();
     if (msg == F("nuevo entrenamiento")) {
+      sendACK();
       trainingToSD();
     }
 
@@ -256,12 +262,13 @@ void sendError() {
 
 void trainingToSD() {
   File training;
+  String msg;
   while (true) {
     if (!BT.available()) {
       delay(100);
       continue;
     }
-    String msg = BT.readString();
+    msg = BT.readString();
     training = SD.open(msg.substring(8) + F(".txt"), FILE_WRITE);
     break;
   }
@@ -271,13 +278,16 @@ void trainingToSD() {
     return;
   }
 
+  training.println(msg);
+  sendACK();
+
   while (true) {
     if (!BT.available()) {
       delay(100);
       continue;
     }
 
-    String msg = BT.readString();
+    msg = BT.readString();
 
     if (msg == F("fin")) {
       sendACK();
@@ -306,29 +316,23 @@ Training* readTraining(String fileName) {
 
   tb = t->trainingBlocks;
 
-  boolean skip = true;
+  if (dataFile.available()) {
+    t->_id = dataFile.readStringUntil('\n');
+    t->date = dataFile.readStringUntil('\n');
+    t->maxDate = dataFile.readStringUntil('\n');
+    t->type = dataFile.readStringUntil('\n');
+    dataFile.readStringUntil('\n'); //Remove #
+  }
 
   while (dataFile.available()) {
     String msg = dataFile.readStringUntil('\n');
-
-    if (msg.startsWith("#")) {
-      skip = false;
-      continue;
-    }
-
-    if (skip) {
-      t->_id = msg;
-      t->date = dataFile.readStringUntil('\n');
-      t->maxDate = dataFile.readStringUntil('\n');
-      t->type = dataFile.readStringUntil('\n');
-      continue;
-    }
 
     if (msg.startsWith("*")) {
       tb->next = ((TrainingBlock*)malloc(sizeof (TrainingBlock)));
       tb = tb->next;
       continue;
     }
+    
     tb->_id = msg;
     msg = dataFile.readStringUntil('\n');
     tb->distance = msg.toInt();
@@ -354,6 +358,11 @@ void printTraining(Training *t) {
   if (t == NULL) {
     return;
   }
+  Serial.println(t->_id);
+  Serial.println(t->date);
+  Serial.println(t->maxDate);
+  Serial.println(t->type);
+  Serial.println(F("#"));
   TrainingBlock *tb = t->trainingBlocks;
   while (tb != NULL) {
     Serial.println(tb->_id);
