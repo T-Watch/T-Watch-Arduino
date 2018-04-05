@@ -9,7 +9,7 @@
 
 typedef struct TrainingBlock
 {
-  String _id;
+  char _id[24];
   int distance;
   int duration;
   int maxHR;
@@ -22,10 +22,10 @@ typedef struct TrainingBlock
 
 typedef struct
 {
-  String _id;
-  String date;
-  String maxDate;
-  String type;
+  char _id[24];
+  char date[29];
+  char maxDate[29];
+  char type[10];
   TrainingBlock *trainingBlocks = NULL;
   TrainingBlock *current = NULL;
 } Training;
@@ -48,7 +48,6 @@ void setup()
   // Initialize SD library
   while (!SD.begin(9)) {
     Serial.println(F("Failed to initialize SD library"));
-    delay(1000);
   }
 
   if (!SD.exists(F("t")))
@@ -124,7 +123,7 @@ void loop()
       receiveTrainingsBT();
     }
   }
-  /*Training *t = readTraining(F("t1.txt"));
+  /*Training *t = readTraining(F("5ABB83F.txt"));
     printTraining(t);
     freeTraining(t);*/
   delay(3000);
@@ -213,7 +212,6 @@ void  sendResultsBT() {
     waitForACK();
   }
   sendACK();
-  Serial.println("JJ");
 
   logFile.close();
 }
@@ -266,7 +264,7 @@ void trainingToSD() {
       continue;
     }
     msg = BT.readString();
-    training = SD.open(msg.substring(8) + F(".txt"), FILE_WRITE);
+    training = SD.open("/t/" + msg.substring(0, 7) + F(".txt"), FILE_WRITE);
     break;
   }
 
@@ -280,7 +278,6 @@ void trainingToSD() {
 
   while (true) {
     if (!BT.available()) {
-      delay(100);
       continue;
     }
 
@@ -314,10 +311,10 @@ Training* readTraining(String fileName) {
   tb = t->trainingBlocks;
 
   if (dataFile.available()) {
-    t->_id = dataFile.readStringUntil('\n');
-    t->date = dataFile.readStringUntil('\n');
-    t->maxDate = dataFile.readStringUntil('\n');
-    t->type = dataFile.readStringUntil('\n');
+    dataFile.readStringUntil('\n').toCharArray(t->_id, 24);
+    dataFile.readStringUntil('\n').toCharArray(t->date, 29);
+    dataFile.readStringUntil('\n').toCharArray(t->maxDate, 29);
+    dataFile.readStringUntil('\n').toCharArray(t->type, 10);
     dataFile.readStringUntil('\n'); //Remove #
   }
 
@@ -329,8 +326,8 @@ Training* readTraining(String fileName) {
       tb = tb->next;
       continue;
     }
-
-    tb->_id = msg;
+    
+    msg.toCharArray(tb->_id, 24);
     msg = dataFile.readStringUntil('\n');
     tb->distance = msg.toInt();
     msg = dataFile.readStringUntil('\n');
