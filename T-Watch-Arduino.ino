@@ -23,6 +23,9 @@ typedef struct TrainingBlock
 typedef struct
 {
   String _id;
+  String date;
+  String maxDate;
+  String type;
   TrainingBlock *trainingBlocks = NULL;
   TrainingBlock *current = NULL;
 } Training;
@@ -88,7 +91,7 @@ void loop()
 
       gps.f_get_position(&latitude2, &longitude2);
       gps.crack_datetime(&year, &month, &day, &hour, &minute, &second, &hundredths);
-      float distance = DistanceBetween2Points( latitude, longitude, latitude2, longitude2, 1 );
+      float distance = gps.distance_between(latitude, longitude, latitude2, longitude2);
 
       myInts[0] = latitude2;
       myInts[1] = longitude2;
@@ -121,11 +124,11 @@ void loop()
       receiveTrainingsBT();
     }
   }
-
   /*Training *t = readTraining(F("t1.txt"));
     printTraining(t);
     freeTraining(t);
     delay(10000);*/
+  delay(3000);
 }
 
 float axisAccel(char axis) {
@@ -260,6 +263,7 @@ void trainingToSD() {
     }
     String msg = BT.readString();
     training = SD.open(msg.substring(8) + F(".txt"), FILE_WRITE);
+    break;
   }
 
   if (!training) {
@@ -279,21 +283,11 @@ void trainingToSD() {
       sendACK();
       break;
     }
+
     training.println(msg);
     sendACK();
   }
   training.close();
-}
-
-float DistanceBetween2Points( float Lat1, float Lon1, float Lat2, float Lon2, float unit_conversion )
-{
-  float dLat = radians( Lat2 - Lat1 );
-  float dLon = radians( Lon2 - Lon1 );
-  float a = sin( dLat / 2.0f ) * sin( dLat / 2.0f ) +
-            cos( radians( Lat1 ) ) * cos( radians( Lat2 ) ) *
-            sin( dLon / 2.0f ) * sin( dLon / 2.0f );
-  float d = 2.0f * atan2( sqrt( a ), sqrt( 1.0f - a ) );
-  return d * 6372795.0f * unit_conversion;
 }
 
 Training* readTraining(String fileName) {
@@ -324,6 +318,9 @@ Training* readTraining(String fileName) {
 
     if (skip) {
       t->_id = msg;
+      t->date = dataFile.readStringUntil('\n');
+      t->maxDate = dataFile.readStringUntil('\n');
+      t->type = dataFile.readStringUntil('\n');
       continue;
     }
 
