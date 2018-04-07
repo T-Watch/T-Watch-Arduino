@@ -1,11 +1,19 @@
-#include <SoftwareSerial.h>//incluimos SoftwareSerial
-#include <TinyGPS.h>//incluimos TinyGPS
+#include <TinyGPS++.h>
 #include <SD.h>
 #include <Wire.h>
 #include <ADXL345.h>
 #include <math.h>
 #define USE_ARDUINO_INTERRUPTS false
 #include <PulseSensorPlayground.h>
+#include <NeoSWSerial.h>
+
+const int t_delay PROGMEM = 3000;
+
+unsigned int distance = 0;
+unsigned int duration = 0;
+unsigned int t_current, t_updated = 0;
+float old_latitude, old_longitude;
+boolean training_mode = true;
 
 typedef struct TrainingBlock
 {
@@ -32,84 +40,92 @@ typedef struct
 
 PulseSensorPlayground pulseSensor;
 ADXL345 adxl;
-TinyGPS gps;
-SoftwareSerial BT(5, 6);
+TinyGPSPlus gps;
+NeoSWSerial BT(5, 6);
+NeoSWSerial gpsSerial(2, 3);
 
 void setup()
 {
-  //Imprimimos:
-  pinMode(9, OUTPUT);
   Serial.begin(9600);
   while (!Serial) continue;
+  Serial.print(F("Initializing..."));
 
+  // GPS
+  gpsSerial.begin(9600);
+  Serial.print(F("GPS..."));
+
+  // BT
   BT.begin(9600);
-  Serial.println(F("Bluetooth Inicializado"));
+  Serial.print(F("BT..."));
 
-  // Initialize SD library
-  while (!SD.begin(9)) {
-    Serial.println(F("Failed to initialize SD library"));
+  // SD
+  while (!SD.begin()) {
   }
+
+  Serial.print(F("SD..."));
 
   if (!SD.exists(F("t")))
   {
-    Serial.println(F("Carpeta trainings creada"));
     SD.mkdir(F("t"));
   }
 
   if (!SD.exists(F("r")))
   {
-    Serial.println(F("Carpeta results creada"));
     SD.mkdir(F("r"));
   }
 
+
+  // Pulse Sensor
   pulseSensor.analogInput(0);
   pulseSensor.setThreshold(550);
-
-  // Double-check the "pulseSensor" object was created and "began" seeing a signal.
   if (pulseSensor.begin()) {
-    Serial.println(F("We created a pulseSensor Object !"));
+    Serial.println(F("pulseSensor"));
   }
 
-  //SD.remove(F("sensores.txt"));
+  // IMU
   adxl.init();
+
+  t_updated = millis();
+
+  if (training_mode) {
+    Serial.println(F("Training mode"));
+    gpsSerial.listen();
+  } else {
+    Serial.println(F("Rest mode"));
+    BT.listen();
+  }
 }
 void loop()
 {
-  int year;
-  byte month, day, hour, minute, second, hundredths;
-  float myInts[12];
-  while (Serial.available())
-  {
-    if (gps.encode(Serial.read()))
+  pulseSensor.sawNewSample();
+  
+  if (training_mode) {
+    t_current = millis();
+
+    while (gpsSerial.available())
     {
-      float latitude, longitude, latitude2, longitude2;
-      gps.f_get_position(&latitude, &longitude);
-      gps.crack_datetime(&year, &month, &day, &hour, &minute, &second, &hundredths);
-
-      delay(3000);
-
-      gps.f_get_position(&latitude2, &longitude2);
-      gps.crack_datetime(&year, &month, &day, &hour, &minute, &second, &hundredths);
-      float distance = gps.distance_between(latitude, longitude, latitude2, longitude2);
-
-      myInts[0] = latitude2;
-      myInts[1] = longitude2;
-      myInts[2] = day;
-      myInts[3] = month;
-      myInts[4] = year;
-      myInts[5] = (hour + 1);
-      myInts[6] = minute;
-      myInts[7] = second;
-      myInts[8] = gps.f_altitude();
-      myInts[9] = gps.f_course();
-      myInts[10] = gps.f_speed_kmph();
-      myInts[11] = distance;
-      Serial.print(F("Escribiendo en sd.."));
-      guardarDatos(myInts);
+      if (gps.encode(gpsSerial.read()) && t_current >= (t_updated + t_delay))
+      {
+        if (!gps.satellites.value()) {
+          Serial.println(F("GPS without signal"));
+          t_updated = millis();
+          break;
+        }
+        if (!gps.location.isValid() || !gps.speed.isValid() || !gps.date.isValid() || !gps.time.isValid()) {
+          Serial.println(F("GPS Data not valid"));
+          t_updated = millis();
+          break;
+        }
+        duration += (t_current - t_updated) / 1000;
+        saveTBResult(F("5ABB83F.txt"), '#');
+        t_updated = millis();
+      }
     }
+    return;
   }
 
-  if (BT.available() > 0 ) //Si hay datos en el BTSerial
+  BT.listen();
+  if (BT.available())
   {
     if (BT.readString() == F("empezar"))
     {
@@ -123,10 +139,10 @@ void loop()
       receiveTrainingsBT();
     }
   }
+
   /*Training *t = readTraining(F("5ABB83F.txt"));
     printTraining(t);
     freeTraining(t);*/
-  delay(3000);
 }
 
 float axisAccel(char axis) {
@@ -134,60 +150,66 @@ float axisAccel(char axis) {
   return acos(a) * 180 / (PI);
 }
 
-
-void guardarDatos(float myInts[12])
+void saveTBResult(String fileName, char end)
 {
-  File logFile = SD.open(F("sensores.txt"), FILE_WRITE);
+  float latitude, longitude;
+  boolean samePoint = gps.location.lat() == old_latitude && old_longitude == gps.location.lng();
+  File logFile = SD.open("/r/" + fileName, FILE_WRITE);
 
-  if (logFile) {
-    Serial.println(F("JJ"));
-    int pulsaciones;
-
-    pulsaciones = pulseSensor.getBeatsPerMinute();;
-
-    logFile.print(F("*"));
-    logFile.print(myInts[0], 3);
-    logFile.print(F(";"));
-    logFile.print(myInts[1], 3);
-    logFile.print(F(";"));
-    logFile.print((int)myInts[5]);
-    logFile.print(F(":"));
-    logFile.print((int)myInts[6]);
-    logFile.print(F(":"));
-    logFile.print((int)myInts[7]);
-    logFile.print(F(";"));
-    logFile.print((int)myInts[2]);
-    logFile.print(F("/"));
-    logFile.print((int)myInts[3]);
-    logFile.print(F("/"));
-    logFile.print((int)myInts[4]);
-    logFile.print(F(";"));
-
-    logFile.print((int)myInts[8]);
-    logFile.print(F(";"));
-    logFile.print((int)myInts[9]);
-    logFile.print(F(";"));
-    logFile.print(myInts[10], 2);
-    logFile.print(F(";"));
-    logFile.print((int)myInts[11]);
-
-    logFile.print(F("~"));
-    logFile.print(axisAccel('X'));
-    logFile.print(F(";"));
-    logFile.print(axisAccel('Y'));
-    logFile.print(F(";"));
-    logFile.print(axisAccel('Z'));
-
-    logFile.print(F("~"));
-    logFile.print(pulsaciones);
-    logFile.println(F("#")); //comprobar correcto ln
-
-    logFile.close();
-
+  if (!logFile) {
+    Serial.println(F("Error saving data"));
+    return;
   }
-  else {
-    Serial.println(F("Error al abrir el archivo"));
+
+  if (old_latitude != 0 & old_longitude != 0 && !samePoint ) {
+    distance += gps.distanceBetween(latitude, longitude, old_latitude, old_longitude);
   }
+
+  old_latitude = gps.location.lat();
+  old_longitude = gps.location.lng();
+
+  // GPS
+  logFile.print(gps.location.lat(), 6);
+  logFile.print(F(";"));
+  logFile.print(gps.location.lng(), 6);
+  logFile.print(F(";"));
+
+  // Date
+  logFile.print(gps.time.hour());
+  logFile.print(F(":"));
+  logFile.print(gps.time.minute());
+  logFile.print(F(":"));
+  logFile.print(gps.time.second());
+  logFile.print(F(";"));
+  logFile.print(gps.date.day());
+  logFile.print(F("/"));
+  logFile.print(gps.date.month());
+  logFile.print(F("/"));
+  logFile.print(gps.date.year());
+  logFile.print(F(";"));
+
+  logFile.print(gps.altitude.meters());
+  logFile.print(F(";"));
+
+  logFile.print(gps.course.deg());
+  logFile.print(F(";"));
+
+  logFile.print(samePoint ? 0 : (60 / gps.speed.kmph()), 6);
+  logFile.print(F(";"));
+  logFile.print(distance);
+
+  logFile.print(F("~"));
+  logFile.print(axisAccel('X'));
+  logFile.print(F(";"));
+  logFile.print(axisAccel('Y'));
+  logFile.print(F(";"));
+  logFile.print(axisAccel('Z'));
+
+  logFile.print(F("~"));
+  logFile.print(pulseSensor.getBeatsPerMinute());
+  logFile.println(end);
+
+  logFile.close();
 }
 
 void  sendResultsBT() {
@@ -326,7 +348,7 @@ Training* readTraining(String fileName) {
       tb = tb->next;
       continue;
     }
-    
+
     msg.toCharArray(tb->_id, 24);
     msg = dataFile.readStringUntil('\n');
     tb->distance = msg.toInt();
