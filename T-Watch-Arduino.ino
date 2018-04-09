@@ -12,7 +12,7 @@ unsigned int distance = 0;
 unsigned int duration = 0;
 unsigned int t_current, t_updated = 0;
 float old_latitude, old_longitude;
-boolean training_mode = true;
+char current_training[8] = "";
 
 typedef struct TrainingBlock
 {
@@ -41,17 +41,12 @@ PulseSensorPlayground pulseSensor;
 ADXL345 adxl;
 TinyGPSPlus gps;
 NeoSWSerial BT(5, 6);
-NeoSWSerial gpsSerial(2, 3);
 
 void setup()
 {
   Serial.begin(9600);
   while (!Serial) continue;
-  Serial.print(F("Initializing..."));
-
-  // GPS
-  gpsSerial.begin(9600);
-  Serial.print(F("GPS..."));
+  Serial.print(F("Initializing...GPS..."));
 
   // BT
   BT.begin(9600);
@@ -60,6 +55,9 @@ void setup()
   // SD
   while (!SD.begin()) {
   }
+
+  // I2C
+  Wire.begin();
 
   Serial.print(F("SD..."));
 
@@ -86,24 +84,18 @@ void setup()
 
   t_updated = millis();
 
-  if (training_mode) {
-    Serial.println(F("Training mode"));
-    gpsSerial.listen();
-  } else {
-    Serial.println(F("Rest mode"));
-    BT.listen();
-  }
+  sendTrainingsI2C();
 }
 void loop()
 {
   pulseSensor.sawNewSample();
 
-  if (training_mode) {
+  if (strcmp(current_training, "") != 0) {
     t_current = millis();
 
-    while (gpsSerial.available())
+    while (Serial.available())
     {
-      if (gps.encode(gpsSerial.read()) && t_current >= (t_updated + t_delay))
+      if (gps.encode(Serial.read()) && t_current >= (t_updated + t_delay))
       {
         if (!gps.satellites.value()) {
           Serial.println(F("GPS without signal"));
@@ -116,7 +108,7 @@ void loop()
           break;
         }
         duration += (t_current - t_updated) / 1000;
-        saveTBResult(F("5ABB83F.txt"), '#');
+        saveTBResult(current_training, '#');
         t_updated = millis();
       }
     }
@@ -141,6 +133,35 @@ void loop()
   /*Training *t = readTraining(F("5ABB83F.txt"));
     printTraining(t);
     freeTraining(t);*/
+}
+
+void sendTrainingsI2C() {
+  File trainings = SD.open(F("/t"));
+  if (!trainings) {
+    return;
+  }
+
+  while (true) {
+    char data[29];
+    File f =  trainings.openNextFile();
+    if (!f || !f.available()) {
+      f.close();
+      break;
+    }
+
+    Wire.beginTransmission(1);
+    f.readStringUntil('\n').toCharArray(data, 24);
+    Wire.write(data);
+    Wire.write("#");
+    f.readStringUntil('\n').toCharArray(data, 29);
+    Wire.write(data);
+    Wire.write("\n");
+    Wire.endTransmission();
+
+    f.close();
+  }
+
+  trainings.close();
 }
 
 float axisAccel(char axis) {
@@ -341,6 +362,7 @@ Training* readTraining(String fileName) {
     dataFile.readStringUntil('\n').toCharArray(t->type, 10);
     dataFile.readStringUntil('\n'); //Remove #
   }
+
 
   while (dataFile.available()) {
     String msg = dataFile.readStringUntil('\n');
