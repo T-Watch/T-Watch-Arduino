@@ -2,7 +2,6 @@
 #include <SD.h>
 #include <Wire.h>
 #include <ADXL345.h>
-#include <math.h>
 #define USE_ARDUINO_INTERRUPTS false
 #include <PulseSensorPlayground.h>
 #include <NeoSWSerial.h>
@@ -98,7 +97,7 @@ void setup()
 void loop()
 {
   pulseSensor.sawNewSample();
-  
+
   if (training_mode) {
     t_current = millis();
 
@@ -124,7 +123,6 @@ void loop()
     return;
   }
 
-  BT.listen();
   if (BT.available())
   {
     if (BT.readString() == F("empezar"))
@@ -216,14 +214,18 @@ void  sendResultsBT() {
   File logFile = SD.open(F("sensores.txt"), FILE_READ);
 
   if (!logFile) {
-    sendError();
-    Serial.print(F("The text file cannot be opened"));
+    Serial.println(F("The text file cannot be opened"));
+    BT.print("&");
+    waitForACK();
+    sendACK();
     return;
   }
 
   if (!logFile.available()) {
-    Serial.print(F("No results to send"));
+    Serial.println(F("No results to send"));
     BT.print("&");
+    waitForACK();
+    sendACK();
     return;
   }
 
