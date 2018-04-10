@@ -46,11 +46,9 @@ void setup()
 {
   Serial.begin(9600);
   while (!Serial) continue;
-  Serial.print(F("Initializing...GPS..."));
 
   // BT
   BT.begin(9600);
-  Serial.print(F("BT..."));
 
   // SD
   while (!SD.begin()) {
@@ -58,8 +56,6 @@ void setup()
 
   // I2C
   Wire.begin();
-
-  Serial.print(F("SD..."));
 
   if (!SD.exists(F("t")))
   {
@@ -76,7 +72,7 @@ void setup()
   pulseSensor.analogInput(0);
   pulseSensor.setThreshold(550);
   if (pulseSensor.begin()) {
-    Serial.println(F("pulseSensor"));
+    // Serial.println(F("pulseSensor"));
   }
 
   // IMU
@@ -85,6 +81,7 @@ void setup()
   t_updated = millis();
 
   sendTrainingsI2C();
+  Serial.println(F("Ready!"));
 }
 void loop()
 {
@@ -98,12 +95,12 @@ void loop()
       if (gps.encode(Serial.read()) && t_current >= (t_updated + t_delay))
       {
         if (!gps.satellites.value()) {
-          Serial.println(F("GPS without signal"));
+          // Serial.println(F("GPS without signal"));
           t_updated = millis();
           break;
         }
         if (!gps.location.isValid() || !gps.speed.isValid() || !gps.date.isValid() || !gps.time.isValid()) {
-          Serial.println(F("GPS Data not valid"));
+          // Serial.println(F("GPS Data not valid"));
           t_updated = millis();
           break;
         }
@@ -119,13 +116,13 @@ void loop()
   {
     if (BT.readString() == F("empezar"))
     {
-      Serial.println(F("Send results started"));
+      // Serial.println(F("Send results started"));
       sendResultsBT();
     }
 
     if (BT.readString() == F("trainings"))
     {
-      Serial.println(F("receiveTrainingsBT started"));
+      // Serial.println(F("receiveTrainingsBT started"));
       receiveTrainingsBT();
     }
   }
@@ -169,14 +166,14 @@ float axisAccel(char axis) {
   return acos(a) * 180 / (PI);
 }
 
-void saveTBResult(String fileName, char end)
+void saveTBResult(String trainingID, char end)
 {
   float latitude, longitude;
   boolean samePoint = gps.location.lat() == old_latitude && old_longitude == gps.location.lng();
-  File logFile = SD.open("/r/" + fileName, FILE_WRITE);
+  File logFile = SD.open((String)F("/r/") + trainingID + (String)F(".txt"), FILE_WRITE);
 
   if (!logFile) {
-    Serial.println(F("Error saving data"));
+    // Serial.println(F("Error saving data"));
     return;
   }
 
@@ -232,33 +229,47 @@ void saveTBResult(String fileName, char end)
 }
 
 void  sendResultsBT() {
-  File logFile = SD.open(F("sensores.txt"), FILE_READ);
-
-  if (!logFile) {
-    Serial.println(F("The text file cannot be opened"));
-    BT.print("&");
+  File results = SD.open(F("/r"));
+  if (!results) {
+    // Serial.println(F("e-r"));
+    results.close();
+    BT.print(F("&"));
     waitForACK();
     sendACK();
     return;
   }
 
-  if (!logFile.available()) {
-    Serial.println(F("No results to send"));
-    BT.print("&");
+  File logFile = results.openNextFile();
+
+  if (!logFile || !logFile.available()) {
+    // Serial.println(F("No results"));
+    logFile.close();
+    results.close();
+    BT.print(F("&"));
     waitForACK();
     sendACK();
     return;
   }
 
-  while (logFile.available()) {
-    BT.write("resultado entrenamiento");
+  while (logFile && logFile.available()) {
+    BT.print(F("resultado entrenamiento"));
     waitForACK();
-    BT.print(logFile.readStringUntil('\n'));
+
+    String s = logFile.readStringUntil('\n');
+    if (!logFile.available()) {
+      logFile.close();
+      logFile = results.openNextFile();
+      if (logFile && logFile.available()) {
+        s.replace(F("&"), F("¡"));
+      }
+    }
+    BT.print(s);
     waitForACK();
   }
+
   sendACK();
-
   logFile.close();
+  results.close();
 }
 
 void receiveTrainingsBT() {
@@ -293,12 +304,12 @@ void waitForACK() {
 }
 
 void sendACK() {
-  BT.print("vale");
+  BT.print(F("vale"));
 }
 
 void sendError() {
   Serial.println(F("BT error"));
-  BT.print("error");
+  BT.print(F("error"));
 }
 
 void trainingToSD() {
@@ -309,7 +320,10 @@ void trainingToSD() {
       continue;
     }
     msg = BT.readString();
-    training = SD.open("/t/" + msg.substring(0, 7) + F(".txt"), FILE_WRITE);
+    if (SD.exists((String)F("/t/") + msg.substring(0, 7) + (String)F(".txt"))) {
+      SD.remove((String)F("/t/") + msg.substring(0, 7) + (String)F(".txt"));
+    }
+    training = SD.open((String)F("/t/") + msg.substring(0, 7) + (String)F(".txt"), FILE_WRITE);
     break;
   }
 
@@ -340,10 +354,10 @@ void trainingToSD() {
 }
 
 Training* readTraining(String fileName) {
-  File dataFile = SD.open("/t/" + fileName, FILE_READ);
+  File dataFile = SD.open((String)F("/t/") + fileName, FILE_READ);
 
   if (!dataFile) {
-    Serial.println(F("error opening training.txt"));
+    // Serial.println(F("error opening training.txt"));
     return NULL;
   }
 
