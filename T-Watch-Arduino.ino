@@ -161,7 +161,7 @@ void sendTrainingsI2C() {
 
 void pullI2C() {
   int i = 0;
-  Wire.requestFrom(1, 8);
+  Wire.requestFrom(1, 9);
   while (Wire.available()) {
     current_training[i] = (char)Wire.read();
     i++;
