@@ -139,7 +139,6 @@ void sendTrainingsI2C() {
   }
 
   while (true) {
-    char data[29];
     File f =  trainings.openNextFile();
     if (!f || !f.available()) {
       f.close();
@@ -147,12 +146,9 @@ void sendTrainingsI2C() {
     }
 
     Wire.beginTransmission(1);
-    f.readStringUntil('\n').toCharArray(data, 24);
-    Wire.write(data);
+    Wire.write(f.readStringUntil('\n').substring(0, 7).c_str());
     Wire.write("#");
-    f.readStringUntil('\n').toCharArray(data, 29);
-    Wire.write(data);
-    Wire.write("\n");
+    Wire.write(f.readStringUntil('\n').c_str());
     Wire.endTransmission();
 
     f.close();
