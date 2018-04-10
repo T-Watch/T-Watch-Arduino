@@ -12,7 +12,7 @@ unsigned int distance = 0;
 unsigned int duration = 0;
 unsigned int t_current, t_updated = 0;
 float old_latitude, old_longitude;
-char current_training[8] = "";
+char current_training[9] = "";
 
 typedef struct TrainingBlock
 {
@@ -87,6 +87,8 @@ void loop()
 {
   pulseSensor.sawNewSample();
 
+  pullI2C();
+
   if (strcmp(current_training, "") != 0) {
     t_current = millis();
 
@@ -155,6 +157,15 @@ void sendTrainingsI2C() {
   }
 
   trainings.close();
+}
+
+void pullI2C() {
+  int i = 0;
+  Wire.requestFrom(1, 8);
+  while (Wire.available()) {
+    current_training[i] = (char)Wire.read();
+    i++;
+  }
 }
 
 float axisAccel(char axis) {
