@@ -1,18 +1,15 @@
 #include <TinyGPS++.h>
-#include <SD.h>
 #include <Wire.h>
+#include <SD.h>
 #include <ADXL345.h>
-#define USE_ARDUINO_INTERRUPTS false
-#include <PulseSensorPlayground.h>
-#include <NeoSWSerial.h>
 
 const int t_delay PROGMEM = 3000;
 
 unsigned int distance = 0;
 unsigned int duration = 0;
+byte BPM = 0;
 unsigned int t_current, t_updated = 0;
 float old_latitude, old_longitude;
-char current_training[9] = "";
 
 typedef struct TrainingBlock
 {
@@ -37,25 +34,25 @@ typedef struct
   TrainingBlock *current = NULL;
 } Training;
 
-PulseSensorPlayground pulseSensor;
 ADXL345 adxl;
 TinyGPSPlus gps;
-NeoSWSerial BT(5, 6);
+Training *current_training = NULL;
 
 void setup()
 {
   Serial.begin(9600);
-  while (!Serial) continue;
-
-  // BT
-  BT.begin(9600);
+  while (!Serial);
+  Serial.print(F("Serial..."));
+  Serial1.begin(9600);
+  while (!Serial1);
+  Serial.print(F("GPS..."));
+  Serial2.begin(9600);
+  while (!Serial2);
+  Serial.print(F("BT..."));
 
   // SD
-  while (!SD.begin()) {
-  }
-
-  // I2C
-  Wire.begin();
+  while (!SD.begin());
+  Serial.print(F("SD..."));
 
   if (!SD.exists(F("t")))
   {
@@ -67,74 +64,97 @@ void setup()
     SD.mkdir(F("r"));
   }
 
-
-  // Pulse Sensor
-  pulseSensor.analogInput(0);
-  pulseSensor.setThreshold(550);
-  if (pulseSensor.begin()) {
-    // Serial.println(F("pulseSensor"));
-  }
-
   // IMU
   adxl.init();
+  Serial.print(F("IMU..."));
 
   t_updated = millis();
-
-  sendTrainingsI2C();
   Serial.println(F("Ready!"));
+
+  current_training = readTraining(F("5ABB83F"));
 }
+
 void loop()
 {
-  pulseSensor.sawNewSample();
-
-  pullI2C();
-
-  if (strcmp(current_training, "") != 0) {
+  // Training mode
+  if (current_training != NULL) {
     t_current = millis();
 
-    while (Serial.available())
+    if (t_current >= (t_updated + 60000)) {
+      BPM = 0;
+    }
+
+    if (analogRead(0) > 550) {
+      BPM++;
+    }
+
+    while (Serial1.available())
     {
-      if (gps.encode(Serial.read()) && t_current >= (t_updated + t_delay))
+      if (gps.encode(Serial1.read()) && t_current >= (t_updated + t_delay))
       {
+
         if (!gps.satellites.value()) {
-          // Serial.println(F("GPS without signal"));
+          Serial.println(F("GPS without signal"));
           t_updated = millis();
           break;
         }
+
         if (!gps.location.isValid() || !gps.speed.isValid() || !gps.date.isValid() || !gps.time.isValid()) {
-          // Serial.println(F("GPS Data not valid"));
+          Serial.println(F("GPS Data not valid"));
           t_updated = millis();
           break;
         }
-        duration += (t_current - t_updated) / 1000;
-        saveTBResult(current_training, '#');
+
+        int maxDuration = current_training->current->duration;
+        int maxDistance = current_training->current->distance;
+
+        Serial.println(maxDuration);
+        Serial.println(duration);
+        Serial.println(maxDistance);
+        Serial.println(distance);
+        Serial.println("*");
+
+        if ((maxDuration != -1 && duration >= maxDuration) || (maxDistance != -1 && distance >= maxDistance)) {
+          char c;
+          if (nextTrainingBlock(current_training) == NULL) {
+            c = '&';
+            freeTraining(current_training);
+            Serial.println(F("Finished training"));
+          } else {
+            c = '$';
+          }
+          duration += (t_current - t_updated) / 1000;
+          saveTBResult(String(current_training->_id).substring(0, 7), c);
+          duration = 0;
+          distance = 0;
+          BPM = 0;
+        } else {
+          duration += (t_current - t_updated) / 1000;
+          saveTBResult(String(current_training->_id).substring(0, 7), '#');
+        }
         t_updated = millis();
       }
     }
     return;
   }
 
-  if (BT.available())
+  if (Serial2.available())
   {
-    if (BT.readString() == F("empezar"))
+    if (Serial2.readString() == F("empezar"))
     {
-      // Serial.println(F("Send results started"));
+      Serial.println(F("Send results started"));
       sendResultsBT();
     }
 
-    if (BT.readString() == F("trainings"))
+    if (Serial2.readString() == F("trainings"))
     {
-      // Serial.println(F("receiveTrainingsBT started"));
+      Serial.println(F("receiveTrainingsBT started"));
       receiveTrainingsBT();
     }
   }
-
-  /*Training *t = readTraining(F("5ABB83F.txt"));
-    printTraining(t);
-    freeTraining(t);*/
 }
 
-void sendTrainingsI2C() {
+/*void sendTrainingsI2C() {
   File trainings = SD.open(F("/t"));
   if (!trainings) {
     return;
@@ -157,16 +177,7 @@ void sendTrainingsI2C() {
   }
 
   trainings.close();
-}
-
-void pullI2C() {
-  int i = 0;
-  Wire.requestFrom(1, 9);
-  while (Wire.available()) {
-    current_training[i] = (char)Wire.read();
-    i++;
-  }
-}
+  }*/
 
 float axisAccel(char axis) {
   float a = adxl.AxisDigitalAccelerometerRead(5, axis);
@@ -180,11 +191,11 @@ void saveTBResult(String trainingID, char end)
   File logFile = SD.open((String)F("/r/") + trainingID + (String)F(".txt"), FILE_WRITE);
 
   if (!logFile) {
-    // Serial.println(F("Error saving data"));
+    Serial.println(F("Error saving data"));
     return;
   }
 
-  if (old_latitude != 0 & old_longitude != 0 && !samePoint ) {
+  if (old_latitude != 0 && old_longitude != 0 && !samePoint ) {
     distance += gps.distanceBetween(latitude, longitude, old_latitude, old_longitude);
   }
 
@@ -229,7 +240,7 @@ void saveTBResult(String trainingID, char end)
   logFile.print(axisAccel('Z'));
 
   logFile.print(F("~"));
-  logFile.print(pulseSensor.getBeatsPerMinute());
+  logFile.print(BPM);
   logFile.println(end);
 
   logFile.close();
@@ -238,9 +249,9 @@ void saveTBResult(String trainingID, char end)
 void  sendResultsBT() {
   File results = SD.open(F("/r"));
   if (!results) {
-    // Serial.println(F("e-r"));
+    Serial.println(F("Error opening results directory"));
     results.close();
-    BT.print(F("&"));
+    Serial2.print(F("&"));
     waitForACK();
     sendACK();
     return;
@@ -249,17 +260,17 @@ void  sendResultsBT() {
   File logFile = results.openNextFile();
 
   if (!logFile || !logFile.available()) {
-    // Serial.println(F("No results"));
+    Serial.println(F("No results"));
     logFile.close();
     results.close();
-    BT.print(F("&"));
+    Serial2.print(F("&"));
     waitForACK();
     sendACK();
     return;
   }
 
   while (logFile && logFile.available()) {
-    BT.print(F("resultado entrenamiento"));
+    Serial2.print(F("resultado entrenamiento"));
     waitForACK();
 
     String s = logFile.readStringUntil('\n');
@@ -270,7 +281,7 @@ void  sendResultsBT() {
         s.replace(F("&"), F("¡"));
       }
     }
-    BT.print(s);
+    Serial2.print(s);
     waitForACK();
   }
 
@@ -282,11 +293,11 @@ void  sendResultsBT() {
 void receiveTrainingsBT() {
   sendACK();
   while (true) {
-    if (!BT.available()) {
+    if (!Serial2.available()) {
       continue;
     }
 
-    String msg = BT.readString();
+    String msg = Serial2.readString();
     if (msg == F("nuevo entrenamiento")) {
       sendACK();
       trainingToSD();
@@ -301,9 +312,9 @@ void receiveTrainingsBT() {
 
 void waitForACK() {
   while (true) {
-    if (BT.available() > 0 ) //Si hay datos en el BTSerial
+    if (Serial2.available() > 0 ) //Si hay datos en el BTSerial
     {
-      if (BT.readString() == F("vale")) {
+      if (Serial2.readString() == F("vale")) {
         break;
       }
     }
@@ -311,22 +322,22 @@ void waitForACK() {
 }
 
 void sendACK() {
-  BT.print(F("vale"));
+  Serial2.print(F("vale"));
 }
 
 void sendError() {
   Serial.println(F("BT error"));
-  BT.print(F("error"));
+  Serial2.print(F("error"));
 }
 
 void trainingToSD() {
   File training;
   String msg;
   while (true) {
-    if (!BT.available()) {
+    if (!Serial2.available()) {
       continue;
     }
-    msg = BT.readString();
+    msg = Serial2.readString();
     if (SD.exists((String)F("/t/") + msg.substring(0, 7) + (String)F(".txt"))) {
       SD.remove((String)F("/t/") + msg.substring(0, 7) + (String)F(".txt"));
     }
@@ -343,11 +354,11 @@ void trainingToSD() {
   sendACK();
 
   while (true) {
-    if (!BT.available()) {
+    if (!Serial2.available()) {
       continue;
     }
 
-    msg = BT.readString();
+    msg = Serial2.readString();
 
     if (msg == F("fin")) {
       sendACK();
@@ -361,10 +372,10 @@ void trainingToSD() {
 }
 
 Training* readTraining(String fileName) {
-  File dataFile = SD.open((String)F("/t/") + fileName, FILE_READ);
+  File dataFile = SD.open((String)F("/t/") + fileName + (String)(".txt"), FILE_READ);
 
   if (!dataFile) {
-    // Serial.println(F("error opening training.txt"));
+    Serial.println((String)F("Error opening Training") + fileName);
     return NULL;
   }
 
@@ -384,7 +395,7 @@ Training* readTraining(String fileName) {
     dataFile.readStringUntil('\n'); //Remove #
   }
 
-
+  String null_string = "null";
   while (dataFile.available()) {
     String msg = dataFile.readStringUntil('\n');
 
@@ -396,55 +407,23 @@ Training* readTraining(String fileName) {
 
     msg.toCharArray(tb->_id, 24);
     msg = dataFile.readStringUntil('\n');
-    tb->distance = msg.toInt();
+    tb->distance = msg.startsWith(null_string) ? -1 : msg.toInt();
     msg = dataFile.readStringUntil('\n');
-    tb->duration = msg.toInt();
+    tb->duration = msg.startsWith(null_string) ? -1 : msg.toInt();
     msg = dataFile.readStringUntil('\n');
-    tb->maxHR = msg.toInt();
+    tb->maxHR = msg.startsWith(null_string) ? -1 : msg.toInt();
     msg = dataFile.readStringUntil('\n');
-    tb->minHR = msg.toInt();
+    tb->minHR = msg.startsWith(null_string) ? -1 : msg.toInt();
     msg = dataFile.readStringUntil('\n');
-    tb->maxSpeed = msg.toFloat();
+    tb->maxSpeed = msg.startsWith(null_string) ? -1 : msg.toFloat();
     msg = dataFile.readStringUntil('\n');
-    tb->minSpeed = msg.toFloat();
+    tb->minSpeed = msg.startsWith(null_string) ? -1 : msg.toFloat();
     msg = dataFile.readStringUntil('\n');
-    tb->altitude = msg.toInt();
+    tb->altitude = msg.startsWith(null_string) ? -1 : msg.toInt();
     tb->next = NULL;
   }
   dataFile.close();
   return t;
-}
-
-void printTraining(Training *t) {
-  if (t == NULL) {
-    return;
-  }
-  Serial.println(t->_id);
-  Serial.println(t->date);
-  Serial.println(t->maxDate);
-  Serial.println(t->type);
-  Serial.println(F("#"));
-  TrainingBlock *tb = t->trainingBlocks;
-  while (tb != NULL) {
-    Serial.println(tb->_id);
-    Serial.println(tb->distance);
-    Serial.println(tb->duration);
-    Serial.println(F("*"));
-    tb = tb->next;
-  }
-}
-
-void freeTraining(Training *t) {
-  if (t == NULL) {
-    return;
-  }
-  TrainingBlock *tb = t->trainingBlocks;
-  while (tb != NULL) {
-    TrainingBlock *previous = tb;
-    tb = tb->next;
-    free(previous);
-  }
-  free(t);
 }
 
 TrainingBlock* nextTrainingBlock(Training *t) {
@@ -456,8 +435,18 @@ TrainingBlock* nextTrainingBlock(Training *t) {
   return t->current;
 }
 
-int freeRAM () {
-  extern int __heap_start, *__brkval;
-  int v;
-  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval);
+void freeTraining(Training *t) {
+  if (t == NULL) {
+    return;
+  }
+  TrainingBlock *tb = t->trainingBlocks;
+  while (tb != NULL) {
+    TrainingBlock *previous = tb;
+    tb = tb->next;
+    free(previous);
+    previous = NULL;
+  }
+  free(t);
+  t = NULL;
 }
+
