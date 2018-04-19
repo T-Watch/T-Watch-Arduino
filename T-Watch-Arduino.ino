@@ -1,7 +1,14 @@
 #include <TinyGPS++.h>
 #include <Wire.h>
 #include <SD.h>
+#include <SPI.h>
+#include <Time.h>
+#include <TimeLib.h>
 #include <ADXL345.h>
+#include <epd1in54.h>
+#include <epdpaint.h>
+#include "imagedata.h"
+
 
 const int t_delay PROGMEM = 3000;
 
@@ -10,6 +17,13 @@ unsigned int duration = 0;
 byte BPM = 0;
 unsigned int t_current, t_updated = 0;
 float old_latitude, old_longitude;
+
+//SCREEN
+Epd epd;
+unsigned char imagen[1024];
+Paint paint(imagen, 0, 0);
+
+
 
 typedef struct TrainingBlock
 {
@@ -38,6 +52,11 @@ ADXL345 adxl;
 TinyGPSPlus gps;
 Training *current_training = NULL;
 
+//Trainings in screen
+//TrainingBlock tb[5]; //Fijar un maximo
+//char training_type[10];
+int nextTB = 0;
+
 void setup()
 {
   Serial.begin(9600);
@@ -50,7 +69,44 @@ void setup()
   while (!Serial2);
   Serial.print(F("BT..."));
 
+  //SPI
+  pinMode(4, OUTPUT);
+  pinMode(10, OUTPUT);
+  digitalWrite(10, HIGH);
+  digitalWrite(4, HIGH);
+  //  SPI.begin();
+
+  //BUTTONS
+  pinMode(11, INPUT_PULLUP);
+  pinMode(2, INPUT_PULLUP);
+  pinMode(3, INPUT_PULLUP);
+
+  
+  //SCREEN
+  setTime(0, 0, 0, 27, 4, 2018);
+  digitalWrite(4, LOW);
+
+  if (epd.Init(lut_full_update) != 0) {
+    Serial.print(F("e-Paper init failed"));
+    return;
+  }
+  epd.ClearFrameMemory(0xFF);   // bit set = white, bit reset = black
+  epd.DisplayFrame();
+  epd.ClearFrameMemory(0xFF);   // bit set = white, bit reset = black
+  epd.DisplayFrame();
+  if (epd.Init(lut_partial_update) != 0) {
+    Serial.print(F("e-Paper init failed"));
+    return;
+  }
+  epd.SetFrameMemory(IMAGE_DATA);
+  epd.DisplayFrame();
+  epd.SetFrameMemory(IMAGE_DATA);
+  epd.DisplayFrame();
+  digitalWrite(4, HIGH);
+
   // SD
+  digitalWrite(10, LOW);
+
   while (!SD.begin());
   Serial.print(F("SD..."));
 
@@ -64,6 +120,9 @@ void setup()
     SD.mkdir(F("r"));
   }
 
+  digitalWrite(10, HIGH);
+
+
   // IMU
   adxl.init();
   Serial.print(F("IMU..."));
@@ -71,11 +130,23 @@ void setup()
   t_updated = millis();
   Serial.println(F("Ready!"));
 
-  current_training = readTraining(F("5ABB83F"));
+  //current_training = readTraining(F("5ABB83F"));
 }
 
 void loop()
 {
+  paintTime();
+
+  /*just for Testing*/
+  if (nextTB == 1) {
+    paintTrainingBlock(current_training->current);
+  }
+  /*just for Testing*/
+  if (nextTB == 2) {
+    Serial.println(F("FIN"));
+    paintEndTraining();
+  }
+
   // Training mode
   if (current_training != NULL) {
     t_current = millis();
@@ -90,6 +161,11 @@ void loop()
 
     while (Serial1.available())
     {
+      if (digitalRead(11) == 0) {
+        Serial.println(F("Boton 12!"));
+        trainingsOnScreen();
+
+      }
       if (gps.encode(Serial1.read()) && t_current >= (t_updated + t_delay))
       {
 
@@ -120,8 +196,10 @@ void loop()
             c = '&';
             freeTraining(current_training);
             Serial.println(F("Finished training"));
+            paintEndTraining();
           } else {
             c = '$';
+            paintTrainingBlock(current_training->current);
           }
           duration += (t_current - t_updated) / 1000;
           saveTBResult(String(current_training->_id).substring(0, 7), c);
@@ -152,12 +230,24 @@ void loop()
       receiveTrainingsBT();
     }
   }
+
 }
 
-/*void sendTrainingsI2C() {
+void trainingsOnScreen() {
+  digitalWrite(4, HIGH);
+  digitalWrite(10, LOW);
+
+  Training tr[8];
+  String aux;
+  int cont = 0;
+  char copy_id[24];
+  char copy_date[29];
+
+  //Read Trainings ID and DATE
   File trainings = SD.open(F("/t"));
-  if (!trainings) {
-    return;
+  while (!trainings) {
+    Serial.println("Opening SD");
+    trainings = SD.open(F("/t"));
   }
 
   while (true) {
@@ -166,18 +256,228 @@ void loop()
       f.close();
       break;
     }
-
-    Wire.beginTransmission(1);
-    Wire.write(f.readStringUntil('\n').substring(0, 7).c_str());
-    Wire.write("#");
-    Wire.write(f.readStringUntil('\n').c_str());
-    Wire.endTransmission();
-
+    aux = f.readStringUntil('\n').substring(0, 7);
+    aux.toCharArray(tr[cont]._id, 24);
+    aux = f.readStringUntil('\n').substring(0, 15);
+    aux.toCharArray(tr[cont].date, 29);
+    f.readStringUntil('\n'); //Remove #
+    cont++;
     f.close();
   }
 
   trainings.close();
-  }*/
+
+  //Paint trainings (date)
+  digitalWrite(10, HIGH);
+  digitalWrite(4, LOW);
+
+  int position = 20;
+  int position_aux = 20;
+  int select_training = 0;
+  int i = 0;
+
+  paint.SetWidth(200);
+  paint.SetHeight(20);
+  paint.Clear(0);
+  //paint.DrawRectangle(0, 20, 200, 20, 0);
+  paint.DrawStringAt(20, 4, "ENTRENAMIENTOS", &Font16, 1);
+  epd.SetFrameMemory(paint.GetImage(), 0, 0, paint.GetWidth(), paint.GetHeight());
+
+  for (i = 0; i < 9; i++) {
+    paint.Clear(1);
+    //paint.DrawRectangle(0, position, 200, position, 1);
+    if (strlen(tr[i]._id) != 0) {
+      paint.DrawStringAt(0, 4, tr[i].date, &Font16, 0);
+    }
+    epd.SetFrameMemory(paint.GetImage(), 0, position, paint.GetWidth(), paint.GetHeight());
+    position += 20;
+  }
+  epd.DisplayFrame();
+
+
+  while (1) {
+    digitalWrite(10, HIGH);
+    digitalWrite(4, LOW);
+    paint.SetWidth(200);
+    paint.SetHeight(20);
+    if (digitalRead(2) == 0) {
+      digitalWrite(10, LOW);
+      digitalWrite(4, HIGH);
+      current_training = readTraining(tr[select_training]._id);
+      digitalWrite(10, HIGH);
+      digitalWrite(4, LOW);
+      paintTrainingBlock(current_training->current);
+      return;
+    }
+    if (digitalRead(3) == 0) {
+      paint.Clear(0);
+      paint.DrawStringAt(20, 4, "ENTRENAMIENTOS", &Font16, 1);
+      epd.SetFrameMemory(paint.GetImage(), 0, 0, paint.GetWidth(), paint.GetHeight());
+      position = 20;
+      for (i = 0; i < 9; i++) {
+        paint.Clear(1);
+        //paint.DrawRectangle(0, position, 200, position, 1);
+        if (strlen(tr[i]._id) != 0) {
+          paint.DrawStringAt(0, 4, tr[i].date, &Font16, 0);
+        }
+        epd.SetFrameMemory(paint.GetImage(), 0, position, paint.GetWidth(), paint.GetHeight());
+        position += 20;
+      }
+      if (position_aux != 20) {
+        select_training++;
+      }
+      paint.Clear(0);
+      paint.DrawStringAt(0, 4, tr[select_training].date, &Font16, 1);
+      epd.SetFrameMemory(paint.GetImage(), 0, position_aux, 200, 24);
+      position_aux += 20;
+      if (strlen(tr[select_training + 1]._id) == 0) {
+        position_aux = 20;
+        select_training = 0;
+      }
+      epd.DisplayFrame();
+    }
+     if (digitalRead(11) == 0) {
+      return;
+    }
+  }
+}
+
+void paintEndTraining() {
+  digitalWrite(4, LOW);
+  paint.SetWidth(200);
+  paint.SetHeight(20);
+  paint.Clear(0);
+  paint.DrawStringAt(0, 4, "Fin Entrenamiento", &Font16, 1);
+  epd.ClearFrameMemory(0xFF);
+  epd.SetFrameMemory(paint.GetImage(), 0, 90, paint.GetWidth(), paint.GetHeight());
+  epd.DisplayFrame();
+  delay(3000);
+  return;
+}
+
+void paintTime() {
+  time_t t = now();
+  int h = 0;
+  int m = 0;
+  int s = 0;
+  digitalWrite(4, LOW);
+  String hora = " ";
+  char  buf[50];
+  String stringAux =  String();
+
+  while (1) {
+    String hora = " ";
+    paint.SetWidth(200);
+    paint.SetHeight(24);
+    paint.Clear(1);
+    //paint.DrawRectangle(0,20,200,20,1);
+    paint.DrawStringAt(20, 4, "T-WATCH", &Font24, 0);
+    epd.ClearFrameMemory(0xFF);
+    epd.SetFrameMemory(paint.GetImage(), 20, 20, paint.GetWidth(), paint.GetHeight());
+
+
+    paint.Clear(1);
+    paint.DrawStringAt(20, 4, "27/04/2018", &Font16, 0);
+    epd.SetFrameMemory(paint.GetImage(), 20, 50, paint.GetWidth(), paint.GetHeight());
+    paint.Clear(1);
+
+    t = now();
+    stringAux =  String(hour(t));
+    hora.concat(stringAux);
+    hora.concat(":");
+    stringAux =  String(minute(t));
+    hora.concat(stringAux);
+    hora.concat(":");
+    stringAux =  String(second(t));
+    hora.concat(stringAux);
+    hora.toCharArray(buf, 50);
+    paint.DrawStringAt(0, 4, buf, &Font24, 0);
+    epd.SetFrameMemory(paint.GetImage(), 20, 120, paint.GetWidth(), paint.GetHeight());
+    paint.Clear(0);
+    epd.DisplayFrame();
+
+
+    if (digitalRead(3) == 0)
+    {
+      h++;
+      s = 0;
+      if (h == 24)h = 0;
+      Serial.println("SUMA SEG");
+      setTime(h, m, s, 0, 0, 0);
+
+    }
+    if (digitalRead(2) == 0) {
+      s = 0;
+      m = m + 1;
+      if (m == 60) {
+        m = 0;
+        h++;
+      }
+      Serial.println("SUMA MIN");
+      setTime(h, m, s, 0, 0, 0);
+    }
+    if (digitalRead(11) == 0) {
+      trainingsOnScreen();
+      break;
+    }
+  }
+
+  digitalWrite(4, HIGH);
+  return;
+}
+
+
+void paintTrainingBlock(TrainingBlock* tb) {
+  char distance[15];
+  char duration[15];
+  char m[2] = "m";
+  char s[2] = "s";
+  digitalWrite(10, HIGH);
+  digitalWrite(4, LOW);
+  for (int i = 0; i < 2; i++) {
+    paint.SetWidth(200);
+    paint.SetHeight(40);
+    epd.ClearFrameMemory(0xFF);
+    paint.Clear(0);
+    paint.DrawStringAt(35, 10, current_training->type, &Font20, 1);
+    paint.DrawRectangle(0, 40, 200, 40, 0);
+    epd.SetFrameMemory(paint.GetImage(), 0, 0, paint.GetWidth(), paint.GetHeight());
+    paint.SetWidth(200);
+    paint.SetHeight(20);
+    if (i == 0) {
+      paint.Clear(1);
+      paint.DrawStringAt(0, 4, "Iniciar Entrenamiento", &Font16, 0);
+      epd.SetFrameMemory(paint.GetImage(), 0, 70, paint.GetWidth(), paint.GetHeight());
+    }
+    if (tb->distance != -1) {
+      itoa(tb->distance, distance, 10);
+      strcat(distance, m);
+      paint.Clear(1);
+      paint.DrawStringAt(60, 4, distance, &Font16, 0);
+      epd.SetFrameMemory(paint.GetImage(), 0, 120, paint.GetWidth(), paint.GetHeight());
+    }
+    if (tb->duration != -1) {
+      itoa(tb->duration, duration, 10);
+      strcat(duration, s);
+      paint.Clear(1);
+      paint.DrawStringAt(60, 4, duration, &Font16, 0);
+      epd.SetFrameMemory(paint.GetImage(), 0, 140, paint.GetWidth(), paint.GetHeight());
+    }
+    epd.DisplayFrame();
+    while (1) {
+      if (digitalRead(2) == 0) {
+          /*INITIALIZE TRAINING*/
+        break;
+      }
+    }
+  }
+  nextTB++; //Just for testing
+  current_training->current = nextTrainingBlock(current_training);
+  digitalWrite(4, HIGH);
+
+  return;
+}
+
 
 float axisAccel(char axis) {
   float a = adxl.AxisDigitalAccelerometerRead(5, axis);
@@ -372,11 +672,13 @@ void trainingToSD() {
 }
 
 Training* readTraining(String fileName) {
+
   File dataFile = SD.open((String)F("/t/") + fileName + (String)(".txt"), FILE_READ);
 
-  if (!dataFile) {
-    Serial.println((String)F("Error opening Training") + fileName);
-    return NULL;
+  while (!dataFile) {
+    dataFile = SD.open((String)F("/t/") + fileName + (String)(".txt"), FILE_READ);
+    Serial.println((String)F("Opening Training") + fileName);
+    //  return NULL;
   }
 
   Training *t = (Training*)malloc(sizeof (Training));
