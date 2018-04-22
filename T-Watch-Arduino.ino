@@ -135,7 +135,7 @@ void setup()
 void loop()
 {
   paintTime();
-
+  
   if (current_training != NULL)Serial.println(F("Training mode"));
   while (current_training != NULL) {
     t_current = millis();
@@ -157,17 +157,16 @@ void loop()
     if (t_current >= (t_updated + t_delay)) {
       duration += (t_current - t_updated) / 1000;
       t_updated = millis();
-      Serial1.println("$PUBX,00*33");
+      Serial1.println("$EIGPQ,RMC*3A");
     }
 
     while (Serial1.available())
     {
       if (gps.encode(Serial1.read())) {
-
-        if (!gps.satellites.value()) {
+        /*if (!gps.satellites.value()) {
           Serial.println(F("GPS without signal"));
           break;
-        }
+        }*/
 
         if (!gps.location.isValid() || !gps.speed.isValid() || !gps.date.isValid() || !gps.time.isValid()) {
           Serial.println(F("GPS Data not valid"));
@@ -176,12 +175,6 @@ void loop()
 
         int maxDuration = current_training->current->duration;
         int maxDistance = current_training->current->distance;
-
-        Serial.println(maxDuration);
-        Serial.println(duration);
-        Serial.println(maxDistance);
-        Serial.println(distance);
-        Serial.println("*");
 
         if ((maxDuration != -1 && duration >= maxDuration) || (maxDistance != -1 && distance >= maxDistance)) {
           char c;
@@ -477,7 +470,6 @@ float axisAccel(char axis) {
 void saveTBResult(String trainingID, char end)
 {
   enableSD();
-  float latitude, longitude;
   boolean samePoint = gps.location.lat() == old_latitude && old_longitude == gps.location.lng();
   File logFile = SD.open((String)F("/r/") + trainingID + (String)F(".txt"), FILE_WRITE);
 
@@ -487,7 +479,7 @@ void saveTBResult(String trainingID, char end)
   }
 
   if (old_latitude != 0 && old_longitude != 0 && !samePoint ) {
-    distance += gps.distanceBetween(latitude, longitude, old_latitude, old_longitude);
+    distance += gps.distanceBetween(gps.location.lat(), gps.location.lng(), old_latitude, old_longitude);
   }
 
   old_latitude = gps.location.lat();
