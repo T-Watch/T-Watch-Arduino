@@ -1,7 +1,5 @@
 #include <TinyGPS++.h>
-#include <Wire.h>
 #include <SD.h>
-#include <SPI.h>
 #include <Time.h>
 #include <TimeLib.h>
 #include <ADXL345.h>
@@ -15,7 +13,7 @@ const int t_delay PROGMEM = 3000;
 unsigned int distance = 0;
 unsigned int duration = 0;
 byte BPM = 0;
-unsigned int t_current, t_updated = 0;
+unsigned int t_current, t_updated, t_updated2 = 0;
 float old_latitude, old_longitude;
 
 //SCREEN
@@ -51,40 +49,48 @@ typedef struct
 ADXL345 adxl;
 TinyGPSPlus gps;
 Training *current_training = NULL;
-
-//Trainings in screen
-//TrainingBlock tb[5]; //Fijar un maximo
-//char training_type[10];
-int nextTB = 0;
-
 void setup()
 {
   Serial.begin(9600);
   while (!Serial);
   Serial.print(F("Serial..."));
+
   Serial1.begin(9600);
   while (!Serial1);
+  delay(2000);
+  Serial1.println(F("$PUBX,40,RMC,0,0,0,0*47")); //RMC OFF
+  delay(100);
+  Serial1.println(F("$PUBX,40,VTG,0,0,0,0*5E")); //VTG OFF
+  delay(100);
+  Serial1.println(F("$PUBX,40,GGA,0,0,0,0*5A")); //CGA OFF
+  delay(100);
+  Serial1.println(F("$PUBX,40,GSA,0,0,0,0*4E")); //GSA OFF
+  delay(100);
+  Serial1.println(F("$PUBX,40,GSV,0,0,0,0*59")); //GSV OFF
+  delay(100);
+  Serial1.println(F("$PUBX,40,GLL,0,0,0,0*5C")); //GLL OFF
+  delay(1000);
   Serial.print(F("GPS..."));
+
   Serial2.begin(9600);
   while (!Serial2);
   Serial.print(F("BT..."));
 
   //SPI
-  pinMode(4, OUTPUT);
+  pinMode(6, OUTPUT);
   pinMode(10, OUTPUT);
   digitalWrite(10, HIGH);
-  digitalWrite(4, HIGH);
-  //  SPI.begin();
+  digitalWrite(6, HIGH);
 
   //BUTTONS
   pinMode(11, INPUT_PULLUP);
   pinMode(2, INPUT_PULLUP);
   pinMode(3, INPUT_PULLUP);
 
-  
+
   //SCREEN
   setTime(0, 0, 0, 27, 4, 2018);
-  digitalWrite(4, LOW);
+  enableScreen();
 
   if (epd.Init(lut_full_update) != 0) {
     Serial.print(F("e-Paper init failed"));
@@ -102,12 +108,10 @@ void setup()
   epd.DisplayFrame();
   epd.SetFrameMemory(IMAGE_DATA);
   epd.DisplayFrame();
-  digitalWrite(4, HIGH);
 
   // SD
-  digitalWrite(10, LOW);
-
-  while (!SD.begin());
+  enableSD();
+  while (!SD.begin(6));
   Serial.print(F("SD..."));
 
   if (!SD.exists(F("t")))
@@ -120,64 +124,53 @@ void setup()
     SD.mkdir(F("r"));
   }
 
-  digitalWrite(10, HIGH);
-
-
   // IMU
   adxl.init();
   Serial.print(F("IMU..."));
 
   t_updated = millis();
   Serial.println(F("Ready!"));
-
-  //current_training = readTraining(F("5ABB83F"));
 }
 
 void loop()
 {
   paintTime();
 
-  /*just for Testing*/
-  if (nextTB == 1) {
-    paintTrainingBlock(current_training->current);
-  }
-  /*just for Testing*/
-  if (nextTB == 2) {
-    Serial.println(F("FIN"));
-    paintEndTraining();
-  }
-
-  // Training mode
-  if (current_training != NULL) {
+  if (current_training != NULL)Serial.println(F("Training mode"));
+  while (current_training != NULL) {
     t_current = millis();
 
-    if (t_current >= (t_updated + 60000)) {
+    if (digitalRead(11) == 0) {
+      freeTraining(current_training);
+      break;
+    }
+
+    if (t_current >= (t_updated2 + 60000)) {
       BPM = 0;
+      t_updated2 = millis();
     }
 
     if (analogRead(0) > 550) {
       BPM++;
     }
 
+    if (t_current >= (t_updated + t_delay)) {
+      duration += (t_current - t_updated) / 1000;
+      t_updated = millis();
+      Serial1.println("$PUBX,00*33");
+    }
+
     while (Serial1.available())
     {
-      if (digitalRead(11) == 0) {
-        Serial.println(F("Boton 12!"));
-        trainingsOnScreen();
-
-      }
-      if (gps.encode(Serial1.read()) && t_current >= (t_updated + t_delay))
-      {
+      if (gps.encode(Serial1.read())) {
 
         if (!gps.satellites.value()) {
           Serial.println(F("GPS without signal"));
-          t_updated = millis();
           break;
         }
 
         if (!gps.location.isValid() || !gps.speed.isValid() || !gps.date.isValid() || !gps.time.isValid()) {
           Serial.println(F("GPS Data not valid"));
-          t_updated = millis();
           break;
         }
 
@@ -201,19 +194,16 @@ void loop()
             c = '$';
             paintTrainingBlock(current_training->current);
           }
-          duration += (t_current - t_updated) / 1000;
           saveTBResult(String(current_training->_id).substring(0, 7), c);
           duration = 0;
           distance = 0;
           BPM = 0;
         } else {
-          duration += (t_current - t_updated) / 1000;
           saveTBResult(String(current_training->_id).substring(0, 7), '#');
         }
-        t_updated = millis();
+        break;
       }
     }
-    return;
   }
 
   if (Serial2.available())
@@ -233,9 +223,18 @@ void loop()
 
 }
 
-void trainingsOnScreen() {
-  digitalWrite(4, HIGH);
+void enableScreen() {
+  digitalWrite(6, HIGH);
   digitalWrite(10, LOW);
+}
+
+void enableSD() {
+  digitalWrite(10, HIGH);
+  digitalWrite(6, LOW);
+}
+
+void trainingsOnScreen() {
+  enableSD();
 
   Training tr[8];
   String aux;
@@ -245,9 +244,9 @@ void trainingsOnScreen() {
 
   //Read Trainings ID and DATE
   File trainings = SD.open(F("/t"));
-  while (!trainings) {
-    Serial.println("Opening SD");
-    trainings = SD.open(F("/t"));
+  if (!trainings) {
+    Serial.println(F("Error reading trainings for screen"));
+    return;
   }
 
   while (true) {
@@ -268,8 +267,7 @@ void trainingsOnScreen() {
   trainings.close();
 
   //Paint trainings (date)
-  digitalWrite(10, HIGH);
-  digitalWrite(4, LOW);
+  enableScreen();
 
   int position = 20;
   int position_aux = 20;
@@ -296,16 +294,11 @@ void trainingsOnScreen() {
 
 
   while (1) {
-    digitalWrite(10, HIGH);
-    digitalWrite(4, LOW);
+    enableScreen();
     paint.SetWidth(200);
     paint.SetHeight(20);
     if (digitalRead(2) == 0) {
-      digitalWrite(10, LOW);
-      digitalWrite(4, HIGH);
       current_training = readTraining(tr[select_training]._id);
-      digitalWrite(10, HIGH);
-      digitalWrite(4, LOW);
       paintTrainingBlock(current_training->current);
       return;
     }
@@ -336,14 +329,14 @@ void trainingsOnScreen() {
       }
       epd.DisplayFrame();
     }
-     if (digitalRead(11) == 0) {
+    if (digitalRead(11) == 0) {
       return;
     }
   }
 }
 
 void paintEndTraining() {
-  digitalWrite(4, LOW);
+  enableScreen();
   paint.SetWidth(200);
   paint.SetHeight(20);
   paint.Clear(0);
@@ -360,7 +353,7 @@ void paintTime() {
   int h = 0;
   int m = 0;
   int s = 0;
-  digitalWrite(4, LOW);
+  enableScreen();
   String hora = " ";
   char  buf[50];
   String stringAux =  String();
@@ -383,12 +376,21 @@ void paintTime() {
 
     t = now();
     stringAux =  String(hour(t));
+    if (hour(t) < 10) {
+      hora.concat(F("0"));
+    }
     hora.concat(stringAux);
     hora.concat(":");
     stringAux =  String(minute(t));
+    if (minute(t) < 10) {
+      hora.concat(F("0"));
+    }
     hora.concat(stringAux);
     hora.concat(":");
     stringAux =  String(second(t));
+    if (second(t) < 10) {
+      hora.concat(F("0"));
+    }
     hora.concat(stringAux);
     hora.toCharArray(buf, 50);
     paint.DrawStringAt(0, 4, buf, &Font24, 0);
@@ -422,18 +424,13 @@ void paintTime() {
     }
   }
 
-  digitalWrite(4, HIGH);
   return;
 }
 
 
 void paintTrainingBlock(TrainingBlock* tb) {
-  char distance[15];
-  char duration[15];
-  char m[2] = "m";
-  char s[2] = "s";
-  digitalWrite(10, HIGH);
-  digitalWrite(4, LOW);
+  enableScreen();
+  String s;
   for (int i = 0; i < 2; i++) {
     paint.SetWidth(200);
     paint.SetHeight(40);
@@ -443,37 +440,30 @@ void paintTrainingBlock(TrainingBlock* tb) {
     paint.DrawRectangle(0, 40, 200, 40, 0);
     epd.SetFrameMemory(paint.GetImage(), 0, 0, paint.GetWidth(), paint.GetHeight());
     paint.SetWidth(200);
-    paint.SetHeight(20);
+    paint.SetHeight(30);
     if (i == 0) {
       paint.Clear(1);
-      paint.DrawStringAt(0, 4, "Iniciar Entrenamiento", &Font16, 0);
+      paint.DrawStringAt(60, 4, ((String)F("Iniciar")).c_str(), &Font16, 0);
+      paint.DrawStringAt(35, 15, ((String)F("Entrenamiento")).c_str(), &Font16, 0);
       epd.SetFrameMemory(paint.GetImage(), 0, 70, paint.GetWidth(), paint.GetHeight());
     }
     if (tb->distance != -1) {
-      itoa(tb->distance, distance, 10);
-      strcat(distance, m);
+      s = (String)F("Distancia: ") + String(tb->distance) + (String)F(" m");
       paint.Clear(1);
-      paint.DrawStringAt(60, 4, distance, &Font16, 0);
+      paint.DrawStringAt(10, 4, s.c_str(), &Font16, 0);
       epd.SetFrameMemory(paint.GetImage(), 0, 120, paint.GetWidth(), paint.GetHeight());
     }
     if (tb->duration != -1) {
-      itoa(tb->duration, duration, 10);
-      strcat(duration, s);
+      s = (String)F("Duración: ") + String(tb->duration / 60) + (String)F(" min");
       paint.Clear(1);
-      paint.DrawStringAt(60, 4, duration, &Font16, 0);
+      paint.DrawStringAt(10, 4, s.c_str(), &Font16, 0);
       epd.SetFrameMemory(paint.GetImage(), 0, 140, paint.GetWidth(), paint.GetHeight());
     }
     epd.DisplayFrame();
-    while (1) {
-      if (digitalRead(2) == 0) {
-          /*INITIALIZE TRAINING*/
-        break;
-      }
+    if (i == 0) {
+      while (digitalRead(2) != 0);
     }
   }
-  nextTB++; //Just for testing
-  current_training->current = nextTrainingBlock(current_training);
-  digitalWrite(4, HIGH);
 
   return;
 }
@@ -486,6 +476,7 @@ float axisAccel(char axis) {
 
 void saveTBResult(String trainingID, char end)
 {
+  enableSD();
   float latitude, longitude;
   boolean samePoint = gps.location.lat() == old_latitude && old_longitude == gps.location.lng();
   File logFile = SD.open((String)F("/r/") + trainingID + (String)F(".txt"), FILE_WRITE);
@@ -547,6 +538,7 @@ void saveTBResult(String trainingID, char end)
 }
 
 void  sendResultsBT() {
+  enableSD();
   File results = SD.open(F("/r"));
   if (!results) {
     Serial.println(F("Error opening results directory"));
@@ -631,6 +623,7 @@ void sendError() {
 }
 
 void trainingToSD() {
+  enableSD();
   File training;
   String msg;
   while (true) {
@@ -672,13 +665,13 @@ void trainingToSD() {
 }
 
 Training* readTraining(String fileName) {
+  enableSD();
 
   File dataFile = SD.open((String)F("/t/") + fileName + (String)(".txt"), FILE_READ);
 
-  while (!dataFile) {
-    dataFile = SD.open((String)F("/t/") + fileName + (String)(".txt"), FILE_READ);
-    Serial.println((String)F("Opening Training") + fileName);
-    //  return NULL;
+  if (!dataFile || !dataFile.available()) {
+    Serial.println((String)F("Error opening Training") + fileName);
+    return NULL;
   }
 
   Training *t = (Training*)malloc(sizeof (Training));
