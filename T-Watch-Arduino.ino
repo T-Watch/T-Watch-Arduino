@@ -25,7 +25,7 @@ Paint paint(imagen, 0, 0);
 
 typedef struct TrainingBlock
 {
-  char _id[24];
+  char _id[25];
   int distance;
   int duration;
   int maxHR;
@@ -38,7 +38,7 @@ typedef struct TrainingBlock
 
 typedef struct
 {
-  char _id[24];
+  char _id[25];
   char date[29];
   char maxDate[29];
   char type[10];
@@ -179,40 +179,24 @@ void loop()
         if ((maxDuration != -1 && duration >= maxDuration) || (maxDistance != -1 && distance >= maxDistance)) {
           char c;
           if (nextTrainingBlock(current_training) == NULL) {
-            saveTBResult(String(current_training->_id).substring(0, 7), '&');
+            saveTBResult(current_training, '&');
             freeTraining(&current_training);
             Serial.println(F("Finished training"));
             paintEndTraining();
           } else {
-            saveTBResult(String(current_training->_id).substring(0, 7), '$');
+            saveTBResult(current_training, '$');
             paintTrainingBlock(current_training->current);
           }
           duration = 0;
           distance = 0;
           BPM = 0;
         } else {
-          saveTBResult(String(current_training->_id).substring(0, 7), '#');
+          saveTBResult(current_training, '#');
         }
         break;
       }
     }
   }
-
-  if (Serial2.available())
-  {
-    if (Serial2.readString() == F("empezar"))
-    {
-      Serial.println(F("Send results started"));
-      sendResultsBT();
-    }
-
-    if (Serial2.readString() == F("trainings"))
-    {
-      Serial.println(F("receiveTrainingsBT started"));
-      receiveTrainingsBT();
-    }
-  }
-
 }
 
 void enableScreen() {
@@ -414,6 +398,22 @@ void paintTime() {
       trainingsOnScreen();
       break;
     }
+
+    // BT
+    if (Serial2.available())
+    {
+      if (Serial2.readString() == F("empezar"))
+      {
+        Serial.println(F("Send results started"));
+        sendResultsBT();
+      }
+
+      if (Serial2.readString() == F("trainings"))
+      {
+        Serial.println(F("receiveTrainingsBT started"));
+        receiveTrainingsBT();
+      }
+    }
   }
 
   return;
@@ -468,15 +468,21 @@ float axisAccel(char axis) {
   return acos(a) * 180 / (PI);
 }
 
-void saveTBResult(String trainingID, char end)
+void saveTBResult(Training *training, char end)
 {
   enableSD();
+  boolean emptyFile = !SD.exists((String)F("/r/") + String(training->_id).substring(0, 7) + (String)F(".txt"));
   boolean samePoint = gps.location.lat() == old_latitude && old_longitude == gps.location.lng();
-  File logFile = SD.open((String)F("/r/") + trainingID + (String)F(".txt"), FILE_WRITE);
+  File logFile = SD.open((String)F("/r/") + String(training->_id).substring(0, 7) + (String)F(".txt"), FILE_WRITE);
 
   if (!logFile) {
     Serial.println(F("Error saving data"));
     return;
+  }
+
+  if (emptyFile) {
+    logFile.print(String(training->current->_id).substring(0, 24));
+    logFile.println(F("º"));
   }
 
   if (old_latitude != 0 && old_longitude != 0 && !samePoint ) {
@@ -526,6 +532,11 @@ void saveTBResult(String trainingID, char end)
   logFile.print(F("~"));
   logFile.print(BPM);
   logFile.println(end);
+
+  if (end == '$') {
+    logFile.print(String(training->current->_id).substring(0, 24));
+    logFile.println(F("º"));
+  }
 
   logFile.close();
 }
@@ -676,7 +687,7 @@ Training* readTraining(String fileName) {
   tb = t->trainingBlocks;
 
   if (dataFile.available()) {
-    dataFile.readStringUntil('\n').toCharArray(t->_id, 24);
+    dataFile.readStringUntil('\n').toCharArray(t->_id, 25);
     dataFile.readStringUntil('\n').toCharArray(t->date, 29);
     dataFile.readStringUntil('\n').toCharArray(t->maxDate, 29);
     dataFile.readStringUntil('\n').toCharArray(t->type, 10);
@@ -693,7 +704,7 @@ Training* readTraining(String fileName) {
       continue;
     }
 
-    msg.toCharArray(tb->_id, 24);
+    msg.toCharArray(tb->_id, 25);
     msg = dataFile.readStringUntil('\n');
     tb->distance = msg.startsWith(null_string) ? -1 : msg.toInt();
     msg = dataFile.readStringUntil('\n');
