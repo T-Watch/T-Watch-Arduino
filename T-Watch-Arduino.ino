@@ -135,13 +135,13 @@ void setup()
 void loop()
 {
   paintTime();
-  
+
   if (current_training != NULL)Serial.println(F("Training mode"));
   while (current_training != NULL) {
     t_current = millis();
 
     if (digitalRead(11) == 0) {
-      freeTraining(current_training);
+      freeTraining(&current_training);
       break;
     }
 
@@ -166,7 +166,7 @@ void loop()
         /*if (!gps.satellites.value()) {
           Serial.println(F("GPS without signal"));
           break;
-        }*/
+          }*/
 
         if (!gps.location.isValid() || !gps.speed.isValid() || !gps.date.isValid() || !gps.time.isValid()) {
           Serial.println(F("GPS Data not valid"));
@@ -179,15 +179,14 @@ void loop()
         if ((maxDuration != -1 && duration >= maxDuration) || (maxDistance != -1 && distance >= maxDistance)) {
           char c;
           if (nextTrainingBlock(current_training) == NULL) {
-            c = '&';
-            freeTraining(current_training);
+            saveTBResult(String(current_training->_id).substring(0, 7), '&');
+            freeTraining(&current_training);
             Serial.println(F("Finished training"));
             paintEndTraining();
           } else {
-            c = '$';
+            saveTBResult(String(current_training->_id).substring(0, 7), '$');
             paintTrainingBlock(current_training->current);
           }
-          saveTBResult(String(current_training->_id).substring(0, 7), c);
           duration = 0;
           distance = 0;
           BPM = 0;
@@ -312,14 +311,14 @@ void trainingsOnScreen() {
       if (position_aux != 20) {
         select_training++;
       }
+      if (strlen(tr[select_training]._id) == 0) {
+        position_aux = 20;
+        select_training = 0;
+      }
       paint.Clear(0);
       paint.DrawStringAt(0, 4, tr[select_training].date, &Font16, 1);
       epd.SetFrameMemory(paint.GetImage(), 0, position_aux, 200, 24);
       position_aux += 20;
-      if (strlen(tr[select_training + 1]._id) == 0) {
-        position_aux = 20;
-        select_training = 0;
-      }
       epd.DisplayFrame();
     }
     if (digitalRead(11) == 0) {
@@ -432,25 +431,27 @@ void paintTrainingBlock(TrainingBlock* tb) {
     paint.DrawStringAt(35, 10, current_training->type, &Font20, 1);
     paint.DrawRectangle(0, 40, 200, 40, 0);
     epd.SetFrameMemory(paint.GetImage(), 0, 0, paint.GetWidth(), paint.GetHeight());
-    paint.SetWidth(200);
-    paint.SetHeight(30);
     if (i == 0) {
+      paint.SetWidth(200);
+      paint.SetHeight(30);
       paint.Clear(1);
       paint.DrawStringAt(60, 4, ((String)F("Iniciar")).c_str(), &Font16, 0);
       paint.DrawStringAt(35, 15, ((String)F("Entrenamiento")).c_str(), &Font16, 0);
-      epd.SetFrameMemory(paint.GetImage(), 0, 70, paint.GetWidth(), paint.GetHeight());
+      epd.SetFrameMemory(paint.GetImage(), 0, 50, paint.GetWidth(), paint.GetHeight());
     }
+    paint.SetWidth(200);
+    paint.SetHeight(20);
     if (tb->distance != -1) {
       s = (String)F("Distancia: ") + String(tb->distance) + (String)F(" m");
       paint.Clear(1);
       paint.DrawStringAt(10, 4, s.c_str(), &Font16, 0);
-      epd.SetFrameMemory(paint.GetImage(), 0, 120, paint.GetWidth(), paint.GetHeight());
+      epd.SetFrameMemory(paint.GetImage(), 0, 100, paint.GetWidth(), paint.GetHeight());
     }
     if (tb->duration != -1) {
-      s = (String)F("Duración: ") + String(tb->duration / 60) + (String)F(" min");
+      s = (String)F("Duracion: ") + String(tb->duration / 60) + (String)F(" min");
       paint.Clear(1);
       paint.DrawStringAt(10, 4, s.c_str(), &Font16, 0);
-      epd.SetFrameMemory(paint.GetImage(), 0, 140, paint.GetWidth(), paint.GetHeight());
+      epd.SetFrameMemory(paint.GetImage(), 0, 120, paint.GetWidth(), paint.GetHeight());
     }
     epd.DisplayFrame();
     if (i == 0) {
@@ -722,18 +723,18 @@ TrainingBlock* nextTrainingBlock(Training *t) {
   return t->current;
 }
 
-void freeTraining(Training *t) {
+void freeTraining(Training **t) {
   if (t == NULL) {
     return;
   }
-  TrainingBlock *tb = t->trainingBlocks;
+  TrainingBlock *tb = (*t)->trainingBlocks;
   while (tb != NULL) {
     TrainingBlock *previous = tb;
     tb = tb->next;
     free(previous);
     previous = NULL;
   }
-  free(t);
-  t = NULL;
+  free(*t);
+  *t = NULL;
 }
 
