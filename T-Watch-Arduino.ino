@@ -6,6 +6,7 @@
 #include <epd1in54.h>
 #include <epdpaint.h>
 #include "imagedata.h"
+#include "smallimagedata.h"
 
 
 const int t_delay PROGMEM = 3000;
@@ -54,7 +55,6 @@ void setup()
   Serial.begin(9600);
   while (!Serial);
   Serial.print(F("Serial..."));
-
   Serial1.begin(9600);
   while (!Serial1);
   delay(2000);
@@ -86,7 +86,6 @@ void setup()
   pinMode(11, INPUT_PULLUP);
   pinMode(2, INPUT_PULLUP);
   pinMode(3, INPUT_PULLUP);
-
 
   //SCREEN
   setTime(0, 0, 0, 27, 4, 2018);
@@ -134,8 +133,8 @@ void setup()
 
 void loop()
 {
-  paintTime();
 
+  paintTime();
   if (current_training != NULL)Serial.println(F("Training mode"));
   while (current_training != NULL) {
     t_current = millis();
@@ -209,7 +208,37 @@ void enableSD() {
   digitalWrite(6, LOW);
 }
 
+void loadScreen() {
+  epd.ClearFrameMemory(0xFF);
+  epd.DisplayFrame();
+  paint.SetWidth(200);
+  paint.SetHeight(20);
+  paint.Clear(1);
+  paint.DrawStringAt(20, 4, "Cargando", &Font16, 0);
+  epd.ClearFrameMemory(0xFF);
+  epd.SetFrameMemory(paint.GetImage(), 30, 80, paint.GetWidth(), paint.GetHeight());
+  paint.Clear(1);
+  paint.DrawStringAt(20, 4, "Entrenamientos", &Font16, 0);
+  epd.SetFrameMemory(paint.GetImage(), 5, 110, paint.GetWidth(), paint.GetHeight());
+  epd.DisplayFrame();
+}
+
+void bluetoothScreen() {
+  paint.SetWidth(200);
+  paint.SetHeight(20);
+  paint.Clear(1);
+  paint.DrawStringAt(20, 4, "Sincronizando", &Font16, 0);
+  epd.ClearFrameMemory(0xFF);
+  epd.SetFrameMemory(paint.GetImage(), 10, 90, paint.GetWidth(), paint.GetHeight());
+  paint.Clear(1);
+  paint.DrawStringAt(20, 4, "Bluetooth", &Font16, 0);
+  epd.SetFrameMemory(paint.GetImage(), 25, 110, paint.GetWidth(), paint.GetHeight());
+  epd.DisplayFrame();
+}
+
 void trainingsOnScreen() {
+  enableScreen();
+  loadScreen();
   enableSD();
 
   Training tr[8];
@@ -257,6 +286,7 @@ void trainingsOnScreen() {
   paint.DrawStringAt(20, 4, "ENTRENAMIENTOS", &Font16, 1);
   epd.SetFrameMemory(paint.GetImage(), 0, 0, paint.GetWidth(), paint.GetHeight());
 
+
   for (i = 0; i < 9; i++) {
     paint.Clear(1);
     //paint.DrawRectangle(0, position, 200, position, 1);
@@ -284,10 +314,9 @@ void trainingsOnScreen() {
       epd.SetFrameMemory(paint.GetImage(), 0, 0, paint.GetWidth(), paint.GetHeight());
       position = 20;
       for (i = 0; i < 9; i++) {
-        paint.Clear(1);
-        //paint.DrawRectangle(0, position, 200, position, 1);
+          paint.Clear(1);     
         if (strlen(tr[i]._id) != 0) {
-          paint.DrawStringAt(0, 4, tr[i].date, &Font16, 0);
+            paint.DrawStringAt(0, 4, tr[i].date, &Font16, 0);
         }
         epd.SetFrameMemory(paint.GetImage(), 0, position, paint.GetWidth(), paint.GetHeight());
         position += 20;
@@ -336,20 +365,23 @@ void paintTime() {
 
   while (1) {
     String hora = " ";
+
+
+    /* paint.SetWidth(200);
+      paint.SetHeight(200);
+      paint.Clear(1);
+      paint.DrawRectangle(0,0,0,0,1);
+      epd.SetFrameMemory(paint.GetImage(), 0, 0, paint.GetWidth(), paint.GetHeight());
+    */
+
+    epd.ClearFrameMemory(0xFF);
+    epd.SetFrameMemory(SMALL_IMAGE_DATA);
     paint.SetWidth(200);
     paint.SetHeight(24);
     paint.Clear(1);
-    //paint.DrawRectangle(0,20,200,20,1);
-    paint.DrawStringAt(20, 4, "T-WATCH", &Font24, 0);
-    epd.ClearFrameMemory(0xFF);
-    epd.SetFrameMemory(paint.GetImage(), 20, 20, paint.GetWidth(), paint.GetHeight());
-
-
-    paint.Clear(1);
     paint.DrawStringAt(20, 4, "27/04/2018", &Font16, 0);
-    epd.SetFrameMemory(paint.GetImage(), 20, 50, paint.GetWidth(), paint.GetHeight());
+    epd.SetFrameMemory(paint.GetImage(), 20, 80, paint.GetWidth(), paint.GetHeight());
     paint.Clear(1);
-
     t = now();
     stringAux =  String(hour(t));
     if (hour(t) < 10) {
@@ -369,6 +401,7 @@ void paintTime() {
     }
     hora.concat(stringAux);
     hora.toCharArray(buf, 50);
+
     paint.DrawStringAt(0, 4, buf, &Font24, 0);
     epd.SetFrameMemory(paint.GetImage(), 20, 120, paint.GetWidth(), paint.GetHeight());
     paint.Clear(0);
@@ -402,6 +435,8 @@ void paintTime() {
     // BT
     if (Serial2.available())
     {
+      enableScreen();
+      bluetoothScreen();
       if (Serial2.readString() == F("empezar"))
       {
         Serial.println(F("Send results started"));
