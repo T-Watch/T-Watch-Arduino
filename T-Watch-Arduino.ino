@@ -135,7 +135,10 @@ void loop()
 {
 
   paintTime();
-  if (current_training != NULL)Serial.println(F("Training mode"));
+  if (current_training != NULL) {
+    Serial.println(F("Training mode"));
+    t_updated = millis();
+  }
   while (current_training != NULL) {
     t_current = millis();
 
@@ -156,29 +159,31 @@ void loop()
     if (t_current >= (t_updated + t_delay)) {
       duration += (t_current - t_updated) / 1000;
       t_updated = millis();
-      Serial1.println("$EIGPQ,RMC*3A");
+      Serial1.println(F("$EIGPQ,RMC*3A"));
     }
 
     while (Serial1.available())
     {
       if (gps.encode(Serial1.read())) {
-        /*if (!gps.satellites.value()) {
+        if (!gps.satellites.value()) {
           Serial.println(F("GPS without signal"));
-          break;
-          }*/
+          // break;
+        }
 
         if (!gps.location.isValid() || !gps.speed.isValid() || !gps.date.isValid() || !gps.time.isValid()) {
           Serial.println(F("GPS Data not valid"));
-          break;
+          // break;
         }
 
         int maxDuration = current_training->current->duration;
         int maxDistance = current_training->current->distance;
 
         if ((maxDuration != -1 && duration >= maxDuration) || (maxDistance != -1 && distance >= maxDistance)) {
-          char c;
           if (nextTrainingBlock(current_training) == NULL) {
             saveTBResult(current_training, '&');
+            t_updated = 0;
+            t_updated2 = 0;
+            t_current = 0;
             freeTraining(&current_training);
             Serial.println(F("Finished training"));
             paintEndTraining();
@@ -191,6 +196,7 @@ void loop()
           BPM = 0;
         } else {
           saveTBResult(current_training, '#');
+          paintTrainingBlock2(current_training->current);
         }
         break;
       }
@@ -214,11 +220,11 @@ void loadScreen() {
   paint.SetWidth(200);
   paint.SetHeight(20);
   paint.Clear(1);
-  paint.DrawStringAt(20, 4, "Cargando", &Font16, 0);
+  paint.DrawStringAt(35, 4, "Cargando", &Font16, 0);
   epd.ClearFrameMemory(0xFF);
   epd.SetFrameMemory(paint.GetImage(), 30, 80, paint.GetWidth(), paint.GetHeight());
   paint.Clear(1);
-  paint.DrawStringAt(20, 4, "Entrenamientos", &Font16, 0);
+  drawCenteredString(4, F("Entrenamientos"), &Font16, 0);
   epd.SetFrameMemory(paint.GetImage(), 5, 110, paint.GetWidth(), paint.GetHeight());
   epd.DisplayFrame();
 }
@@ -288,10 +294,10 @@ void trainingsOnScreen() {
 
 
   for (i = 0; i < 9; i++) {
-    paint.Clear(1);
+    paint.Clear(i == 0 ? 0 : 1);
     //paint.DrawRectangle(0, position, 200, position, 1);
     if (strlen(tr[i]._id) != 0) {
-      paint.DrawStringAt(0, 4, tr[i].date, &Font16, 0);
+      paint.DrawStringAt(0, 4, tr[i].date, &Font16, i == 0 ? 1 : 0);
     }
     epd.SetFrameMemory(paint.GetImage(), 0, position, paint.GetWidth(), paint.GetHeight());
     position += 20;
@@ -303,35 +309,33 @@ void trainingsOnScreen() {
     enableScreen();
     paint.SetWidth(200);
     paint.SetHeight(20);
-    if (digitalRead(2) == 0) {
+    if (digitalRead(3) == 0) {
       current_training = readTraining(tr[select_training]._id);
       paintTrainingBlock(current_training->current);
       return;
     }
-    if (digitalRead(3) == 0) {
-      paint.Clear(0);
-      paint.DrawStringAt(20, 4, "ENTRENAMIENTOS", &Font16, 1);
-      epd.SetFrameMemory(paint.GetImage(), 0, 0, paint.GetWidth(), paint.GetHeight());
-      position = 20;
-      for (i = 0; i < 9; i++) {
-          paint.Clear(1);     
-        if (strlen(tr[i]._id) != 0) {
-            paint.DrawStringAt(0, 4, tr[i].date, &Font16, 0);
-        }
-        epd.SetFrameMemory(paint.GetImage(), 0, position, paint.GetWidth(), paint.GetHeight());
-        position += 20;
-      }
-      if (position_aux != 20) {
-        select_training++;
-      }
+    if (digitalRead(2) == 0) {
+      select_training++;
+      position_aux += 20;
       if (strlen(tr[select_training]._id) == 0) {
         position_aux = 20;
         select_training = 0;
       }
       paint.Clear(0);
+      paint.DrawStringAt(20, 4, "ENTRENAMIENTOS", &Font16, 1);
+      epd.SetFrameMemory(paint.GetImage(), 0, 0, paint.GetWidth(), paint.GetHeight());
+      position = 20;
+      for (i = 0; i < 9; i++) {
+        paint.Clear(1);
+        if (strlen(tr[i]._id) != 0) {
+          paint.DrawStringAt(0, 4, tr[i].date, &Font16, 0);
+        }
+        epd.SetFrameMemory(paint.GetImage(), 0, position, paint.GetWidth(), paint.GetHeight());
+        position += 20;
+      }
+      paint.Clear(0);
       paint.DrawStringAt(0, 4, tr[select_training].date, &Font16, 1);
       epd.SetFrameMemory(paint.GetImage(), 0, position_aux, 200, 24);
-      position_aux += 20;
       epd.DisplayFrame();
     }
     if (digitalRead(11) == 0) {
@@ -379,7 +383,7 @@ void paintTime() {
     paint.SetWidth(200);
     paint.SetHeight(24);
     paint.Clear(1);
-    paint.DrawStringAt(20, 4, "27/04/2018", &Font16, 0);
+    paint.DrawStringAt(30, 4, "27/04/2018", &Font16, 0);
     epd.SetFrameMemory(paint.GetImage(), 20, 80, paint.GetWidth(), paint.GetHeight());
     paint.Clear(1);
     t = now();
@@ -435,16 +439,18 @@ void paintTime() {
     // BT
     if (Serial2.available())
     {
-      enableScreen();
-      bluetoothScreen();
       if (Serial2.readString() == F("empezar"))
       {
+        enableScreen();
+        bluetoothScreen();
         Serial.println(F("Send results started"));
         sendResultsBT();
       }
 
       if (Serial2.readString() == F("trainings"))
       {
+        enableScreen();
+        bluetoothScreen();
         Serial.println(F("receiveTrainingsBT started"));
         receiveTrainingsBT();
       }
@@ -452,6 +458,12 @@ void paintTime() {
   }
 
   return;
+}
+
+void drawCenteredString(int y, String s, _tFont *font, int colored) {
+  int pos = s.length() * (font->Width);
+  pos = (200 - pos) / 2;
+  paint.DrawStringAt(pos, y, s.c_str(), font, colored);
 }
 
 
@@ -463,7 +475,7 @@ void paintTrainingBlock(TrainingBlock* tb) {
     paint.SetHeight(40);
     epd.ClearFrameMemory(0xFF);
     paint.Clear(0);
-    paint.DrawStringAt(35, 10, current_training->type, &Font20, 1);
+    drawCenteredString(10, String(current_training->type).substring(0, strlen(current_training->type) - 1), &Font20, 1);
     paint.DrawRectangle(0, 40, 200, 40, 0);
     epd.SetFrameMemory(paint.GetImage(), 0, 0, paint.GetWidth(), paint.GetHeight());
     if (i == 0) {
@@ -473,9 +485,16 @@ void paintTrainingBlock(TrainingBlock* tb) {
       paint.DrawStringAt(60, 4, ((String)F("Iniciar")).c_str(), &Font16, 0);
       paint.DrawStringAt(35, 15, ((String)F("Entrenamiento")).c_str(), &Font16, 0);
       epd.SetFrameMemory(paint.GetImage(), 0, 50, paint.GetWidth(), paint.GetHeight());
+    } else {
+      s = String(distance / duration) + (String)F(" m/s");
+      paint.Clear(1);
+      drawCenteredString(4, s, &Font16, 0);
+      epd.SetFrameMemory(paint.GetImage(), 0, 80, paint.GetWidth(), paint.GetHeight());
     }
+
     paint.SetWidth(200);
     paint.SetHeight(20);
+
     if (tb->distance != -1) {
       s = (String)F("Distancia: ") + String(tb->distance) + (String)F(" m");
       paint.Clear(1);
@@ -483,20 +502,76 @@ void paintTrainingBlock(TrainingBlock* tb) {
       epd.SetFrameMemory(paint.GetImage(), 0, 100, paint.GetWidth(), paint.GetHeight());
     }
     if (tb->duration != -1) {
-      s = (String)F("Duracion: ") + String(tb->duration / 60) + (String)F(" min");
+      s = (String)F("Duracion: ");
+      if ((tb->duration / 60) < 1) {
+        s += String(tb->duration) + (String)F(" seg");
+      } else {
+        s += String(tb->duration / 60) + (String)F(" min");
+      }
       paint.Clear(1);
       paint.DrawStringAt(10, 4, s.c_str(), &Font16, 0);
       epd.SetFrameMemory(paint.GetImage(), 0, 120, paint.GetWidth(), paint.GetHeight());
     }
     epd.DisplayFrame();
     if (i == 0) {
-      while (digitalRead(2) != 0);
+      while (true) {
+        if (digitalRead(3) == 0) {
+          break;
+        }
+        if (digitalRead(11) == 0) {
+          freeTraining(&current_training);
+          trainingsOnScreen();
+          break;
+        }
+      }
     }
   }
 
   return;
 }
 
+void paintTrainingBlock2(TrainingBlock* tb) {
+  enableScreen();
+  String s;
+  for (int i = 0; i < 2; i++) {
+    paint.SetWidth(200);
+    paint.SetHeight(40);
+    epd.ClearFrameMemory(0xFF);
+    paint.Clear(0);
+    drawCenteredString(10, String(current_training->type).substring(0, strlen(current_training->type) - 1), &Font20, 1);
+    paint.DrawRectangle(0, 40, 200, 40, 0);
+    epd.SetFrameMemory(paint.GetImage(), 0, 0, paint.GetWidth(), paint.GetHeight());
+
+    s = String(distance / duration) + (String)F(" m/s");
+    paint.Clear(1);
+    drawCenteredString(4, s, &Font16, 0);
+    epd.SetFrameMemory(paint.GetImage(), 0, 80, paint.GetWidth(), paint.GetHeight());
+
+    paint.SetWidth(200);
+    paint.SetHeight(20);
+
+    if (tb->distance != -1) {
+      s = (String)F("Distancia: ") + String(tb->distance) + (String)F(" m");
+      paint.Clear(1);
+      paint.DrawStringAt(10, 4, s.c_str(), &Font16, 0);
+      epd.SetFrameMemory(paint.GetImage(), 0, 100, paint.GetWidth(), paint.GetHeight());
+    }
+    if (tb->duration != -1) {
+      s = (String)F("Duracion: ");
+      if ((tb->duration / 60) < 1) {
+        s += String(tb->duration) + (String)F(" seg");
+      } else {
+        s += String(tb->duration / 60) + (String)F(" min");
+      }
+      paint.Clear(1);
+      paint.DrawStringAt(10, 4, s.c_str(), &Font16, 0);
+      epd.SetFrameMemory(paint.GetImage(), 0, 120, paint.GetWidth(), paint.GetHeight());
+    }
+    epd.DisplayFrame();
+  }
+
+  return;
+}
 
 float axisAccel(char axis) {
   float a = adxl.AxisDigitalAccelerometerRead(5, axis);
@@ -553,7 +628,7 @@ void saveTBResult(Training *training, char end)
   logFile.print(gps.course.deg());
   logFile.print(F(";"));
 
-  logFile.print(samePoint ? 0 : (60 / gps.speed.kmph()), 6);
+  logFile.print(samePoint ? 0 : (distance / duration), 6);
   logFile.print(F(";"));
   logFile.print(distance);
 
@@ -606,7 +681,9 @@ void  sendResultsBT() {
 
     String s = logFile.readStringUntil('\n');
     if (!logFile.available()) {
+      String file_name = logFile.name();
       logFile.close();
+      SD.remove((String)F("/r/") + file_name);
       logFile = results.openNextFile();
       if (logFile && logFile.available()) {
         s.replace(F("&"), F("¡"));
